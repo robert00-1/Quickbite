@@ -137,6 +137,16 @@ def create_order():
         "order": serialize_order(order),
     }), 201
 
+@orders_bp.route("", methods=["GET"])
+def get_orders():
+    orders = Order.query.order_by(
+        Order.created_at.desc(),
+        Order.id.desc()
+    ).all()
+
+    return jsonify([serialize_order(order) for order in orders]), 200
+
+
 @orders_bp.route("/<int:order_id>", methods=["GET"])
 def get_order(order_id):
     order = db.session.get(Order, order_id)

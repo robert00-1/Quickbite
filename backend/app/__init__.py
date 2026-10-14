@@ -9,7 +9,7 @@ from .routes.menu_items import menu_items_bp
 from .routes.orders import orders_bp
 from .routes.payments import payments_bp
 from .routes.waiter import waiter_bp
-
+from .routes.manager import manager_bp
 
 def create_app():
     app = Flask(__name__)
@@ -24,5 +24,7 @@ def create_app():
     app.register_blueprint(orders_bp)
     app.register_blueprint(payments_bp)
     app.register_blueprint(waiter_bp)
+    app.register_blueprint(manager_bp)
+
 
     return app
