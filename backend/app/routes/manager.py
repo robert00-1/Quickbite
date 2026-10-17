@@ -1,10 +1,10 @@
-
 from collections import defaultdict
 from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request
 
 from ..models.order import Order
+from ..utils.auth import staff_required
 
 
 manager_bp = Blueprint(
@@ -14,6 +14,8 @@ manager_bp = Blueprint(
 )
 
 ORDER_STATUSES = ["PENDING", "PREPARING", "READY", "SERVED"]
+
+
 def get_value(obj, *names, default=None):
     """Read the first available attribute from an object."""
     for name in names:
@@ -21,50 +23,65 @@ def get_value(obj, *names, default=None):
         if value is not None:
             return value
     return default
+
+
 def serialize_order(order):
     """Convert an SQLAlchemy order into JSON-friendly data."""
     items = []
-    for line in (getattr(order, "items", None) or []):
-        menu_item = getattr(line, "menu_item", None)
 
+    for line in (getattr(order, "items", None) or []):
         items.append({
             "id": getattr(line, "id", None),
-            "name": (
-                get_value(menu_item, "name")
-                or get_value(line, "name", default="Unknown item")
+            "name": get_value(
+                line, "item_name", "name", default="Unknown item"
             ),
             "quantity": get_value(line, "quantity", default=1),
-            "price": (
-                get_value(line, "price")
-                if get_value(line, "price") is not None
-                else get_value(menu_item, "price", default=0)
+            "price": get_value(
+                line, "unit_price", "price", default=0
             ),
         })
+
     created_at = get_value(order, "created_at")
+
     return {
         "id": order.id,
         "customer": get_value(
             order, "customer_name", "customer", default=""
         ),
         "customer_phone": get_value(
-            order, "customer_phone", "phone_number", default=""
+            order,
+            "customer_phone",
+            "phone",
+            "phone_number",
+            default="",
         ),
         "table_number": get_value(order, "table_number"),
         "total_amount": get_value(
             order, "total_amount", "total", default=0
         ),
-        "payment_method": get_value(order, "payment_method", default=""),
-        "payment_status": get_value(order, "payment_status", default=""),
+        "payment_method": get_value(
+            order, "payment_method", default=""
+        ),
+        "payment_status": get_value(
+            order, "payment_status", default=""
+        ),
         "created_at": (
             created_at.isoformat()
             if created_at and hasattr(created_at, "isoformat")
             else created_at
         ),
         "status": str(
-            get_value(order, "status", default="PENDING")
+            get_value(
+                order,
+                "order_status",
+                "status",
+                default="PENDING",
+            )
         ).upper(),
         "items": items,
     }
+
+
 def load_orders():
     """Load shared orders from the database, newest first."""
     orders = Order.query.all()
@@ -76,6 +93,8 @@ def load_orders():
         ),
         reverse=True,
     )
+
+
 def parse_date(value):
     """Parse YYYY-MM-DD query parameters."""
     if not value:
@@ -87,15 +106,19 @@ def parse_date(value):
         raise ValueError(
             f"Invalid date '{value}'. Use YYYY-MM-DD."
         )
+
+
 def order_in_date_range(order, start_date=None, end_date=None):
     created_at = get_value(order, "created_at")
 
     if not created_at:
         return False
 
-    order_date = created_at.date() if isinstance(
-        created_at, datetime
-    ) else created_at
+    order_date = (
+        created_at.date()
+        if isinstance(created_at, datetime)
+        else created_at
+    )
 
     if isinstance(order_date, datetime):
         order_date = order_date.date()
@@ -110,13 +133,21 @@ def order_in_date_range(order, start_date=None, end_date=None):
         return False
 
     return True
+
+
 def order_amount(order):
     try:
         return float(
-            get_value(order, "total_amount", "total", default=0) or 0
+            get_value(
+                order,
+                "total_amount",
+                "total",
+                default=0,
+            ) or 0
         )
     except (TypeError, ValueError):
         return 0.0
+
 
 def is_paid(order):
     """Only count confirmed payments as revenue."""
@@ -124,24 +155,42 @@ def is_paid(order):
         get_value(order, "payment_status", default="")
     ).strip().upper()
 
-    # A missing payment status is deliberately not assumed to be paid.
-    return status in {"PAID", "COMPLETED", "SUCCESS", "SUCCESSFUL"}
+    # Missing payment status is not assumed to mean paid.
+    return status in {
+        "PAID",
+        "COMPLETED",
+        "SUCCESS",
+        "SUCCESSFUL",
+    }
+
+
 def payment_type(order):
     return str(
         get_value(order, "payment_method", default="")
     ).strip().upper().replace("-", "").replace("_", "")
+
+
 def unique_customers(orders):
     """Count identifiable customers without counting each order twice."""
     customers = {}
+
     for order in orders:
         name = str(
-            get_value(order, "customer_name", "customer", default="")
-            or ""
+            get_value(
+                order,
+                "customer_name",
+                "customer",
+                default="",
+            ) or ""
         ).strip()
 
         phone = str(
             get_value(
-                order, "customer_phone", "phone_number", default=""
+                order,
+                "customer_phone",
+                "phone",
+                "phone_number",
+                default="",
             ) or ""
         ).strip()
 
@@ -159,17 +208,25 @@ def unique_customers(orders):
         }
 
     return customers
+
+
 @manager_bp.get("/orders")
+@staff_required("manager")
 def get_manager_orders():
     """Return orders in the format expected by managerApi.js."""
     try:
         orders = load_orders()
-        return jsonify([serialize_order(order) for order in orders]), 200
+        return jsonify([
+            serialize_order(order) for order in orders
+        ]), 200
     except Exception:
         return jsonify({
             "error": "Unable to retrieve orders."
         }), 500
+
+
 @manager_bp.get("/dashboard")
+@staff_required("manager")
 def get_manager_dashboard():
     """Return the manager dashboard's summary statistics."""
     try:
@@ -204,7 +261,12 @@ def get_manager_dashboard():
 
         for order in orders:
             status = str(
-                get_value(order, "status", default="")
+                get_value(
+                    order,
+                    "order_status",
+                    "status",
+                    default="",
+                )
             ).upper()
 
             if status in status_counts:
@@ -223,6 +285,7 @@ def get_manager_dashboard():
             if is_paid(order)
             and payment_type(order) in {"MPESA", "SAFARICOM"}
         )
+
         return jsonify({
             "stats": {
                 "total_orders": len(orders),
@@ -232,18 +295,40 @@ def get_manager_dashboard():
                 "active_orders": sum(
                     1 for order in orders
                     if str(
-                        get_value(order, "status", default="")
-                    ).upper() in {"PENDING", "PREPARING", "READY"}
+                        get_value(
+                            order,
+                            "order_status",
+                            "status",
+                            default="",
+                        )
+                    ).upper() in {
+                        "PENDING",
+                        "PREPARING",
+                        "READY",
+                    }
                 ),
-                "total_sales": round(sum(
-                    order_amount(order) for order in orders if is_paid(order)
-                ), 2),
-                "monthly_revenue": round(sum(
-                    order_amount(order) for order in monthly_paid
-                ), 2),
-                "today_revenue": round(sum(
-                    order_amount(order) for order in paid_today
-                ), 2),
+                "total_sales": round(
+                    sum(
+                        order_amount(order)
+                        for order in orders
+                        if is_paid(order)
+                    ),
+                    2,
+                ),
+                "monthly_revenue": round(
+                    sum(
+                        order_amount(order)
+                        for order in monthly_paid
+                    ),
+                    2,
+                ),
+                "today_revenue": round(
+                    sum(
+                        order_amount(order)
+                        for order in paid_today
+                    ),
+                    2,
+                ),
             },
             "payments": {
                 "cash": round(cash_sales, 2),
@@ -256,7 +341,10 @@ def get_manager_dashboard():
         return jsonify({
             "error": "Unable to calculate dashboard statistics."
         }), 500
+
+
 @manager_bp.get("/sales")
+@staff_required("manager")
 def get_manager_sales():
     """Return sales totals grouped by date."""
     try:
@@ -270,7 +358,11 @@ def get_manager_sales():
 
         orders = [
             order for order in load_orders()
-            if order_in_date_range(order, start_date, end_date)
+            if order_in_date_range(
+                order,
+                start_date,
+                end_date,
+            )
         ]
 
         daily_sales = defaultdict(float)
@@ -281,6 +373,7 @@ def get_manager_sales():
                 continue
 
             created_at = get_value(order, "created_at")
+
             order_date = (
                 created_at.date()
                 if isinstance(created_at, datetime)
@@ -302,7 +395,9 @@ def get_manager_sales():
         ]
 
         return jsonify({
-            "total_sales": round(sum(daily_sales.values()), 2),
+            "total_sales": round(
+                sum(daily_sales.values()), 2
+            ),
             "sales": sales,
         }), 200
 
@@ -315,6 +410,7 @@ def get_manager_sales():
 
 
 @manager_bp.get("/customers")
+@staff_required("manager")
 def get_manager_customers():
     """Return unique identifiable customers derived from orders."""
     try:

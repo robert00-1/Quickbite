@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMeals } from "../services/api";
@@ -15,26 +16,45 @@ function Menu() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchMeals = async () => {
       try {
         const data = await getMeals();
-        setMeals(data);
-      } catch (error) {
-        setError("Unable to load menu. Please try again.");
+
+        if (!cancelled) {
+          // Keep every meal, including unavailable meals.
+          setMeals(Array.isArray(data) ? data : []);
+          setError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Menu loading error:", err);
+          setError("Unable to load menu. Please try again.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchMeals();
+
+    const intervalId = setInterval(fetchMeals, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, []);
 
   const categories = [
-    ...new Set(meals.map((meal) => meal.category)),
+    ...new Set(meals.map((meal) => meal.category).filter(Boolean)),
   ];
 
   const filteredMeals = meals.filter((meal) => {
-    const matchesSearch = meal.name
+    const matchesSearch = (meal.name ?? "")
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
 
@@ -49,14 +69,12 @@ function Menu() {
     return <Loading />;
   }
 
-  if (error) {
+  if (error && meals.length === 0) {
     return <ErrorMessage message={error} />;
   }
 
   return (
     <main className="mx-auto max-w-[1200px] px-5 py-8">
-
-      {/* Header */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold text-gray-800">
           QUICKBITE <span className="text-red-500">Menu</span>
@@ -70,7 +88,6 @@ function Menu() {
         </Link>
       </div>
 
-      {/* Search and Category Filter */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row">
         <SearchBar
           searchTerm={searchTerm}
@@ -84,14 +101,16 @@ function Menu() {
         />
       </div>
 
-      {/* Menu */}
+      {error && (
+        <p className="mb-4 text-sm text-red-600">{error}</p>
+      )}
+
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         {filteredMeals.map((meal) => (
           <FoodCard key={meal.id} food={meal} />
         ))}
       </div>
 
-      {/* No Results */}
       {filteredMeals.length === 0 && (
         <p className="mt-10 text-center text-gray-500">
           No meals found.
@@ -102,4 +121,3 @@ function Menu() {
 }
 
 export default Menu;
-

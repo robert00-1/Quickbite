@@ -36,3 +36,6 @@ __pycache__/
 # Local virtual environments
 venv/
 .venv/
+backend/app/static/uploads/
+backend/backups/
+*.bak
