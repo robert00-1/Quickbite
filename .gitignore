@@ -39,3 +39,4 @@ venv/
 backend/app/static/uploads/
 backend/backups/
 *.bak
+dist/
