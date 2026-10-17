@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "8d6d4bbfd8865f97b558efbc634060059afe71b5d318fef5efffc3feb0e14d31"
+            "sha256": "c8eedddb222c67e3a6c3d3095424a88c0722207f438d22e06f74c97dcd5891a5"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -228,6 +228,14 @@
             "index": "pypi",
             "markers": "python_version >= '3.10'",
             "version": "==8.5.0"
+        },
+        "cloudinary": {
+            "hashes": [
+                "sha256:9577287a679bb1f19c74cd9e9f27d8c0d122f33a102d6031263868c41d93ee19",
+                "sha256:abc5fdf7f2e3d55b81d520d3ea63242f9e1f35e0106957f1bb479d997a224e08"
+            ],
+            "index": "pypi",
+            "version": "==1.46.3"
         },
         "flask": {
             "hashes": [
@@ -558,6 +566,14 @@
             "index": "pypi",
             "markers": "python_version >= '3.10'",
             "version": "==2.34.2"
+        },
+        "six": {
+            "hashes": [
+                "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+                "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"
+            ],
+            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3'",
+            "version": "==1.17.0"
         },
         "sqlalchemy": {
             "hashes": [

@@ -94,3 +94,14 @@ export async function uploadMenuItemImage(file) {
     body: formData,
   });
 }
+
+export async function updateMenuItemImage(itemId, imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") {
+    throw new Error("A valid image URL is required.");
+  }
+
+  return staffRequest(`/menu-items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ image: imageUrl }),
+  });
+}

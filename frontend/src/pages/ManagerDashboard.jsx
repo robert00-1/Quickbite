@@ -13,7 +13,9 @@ import {
   getManagerOrders,
   getMenuItems,
   updateMenuItemAvailability,
+  updateMenuItemImage,
   uploadMenuItemImage,
+
 } from "../services/managerApi";
 
 import {
@@ -101,6 +103,7 @@ function ManagerDashboard() {
   const [stockError, setStockError] = useState("");
   const [savingStockId, setSavingStockId] = useState(null);
   const [stockSuccess, setStockSuccess] = useState("");
+  const [uploadingImageId, setUploadingImageId] = useState(null);
 
   // Add Food form.
   const [showAddFoodForm, setShowAddFoodForm] = useState(false);
@@ -229,6 +232,63 @@ function ManagerDashboard() {
       setSavingStockId(null);
     }
   };
+
+  // Upload a new photo for an existing menu item.
+  const handleExistingFoodImageChange = async (event, item) => {
+    const file = event.target.files?.[0];
+
+    // Allow selecting the same file again later.
+    event.target.value = "";
+
+    if (!file) return;
+
+    setStockError("");
+    setStockSuccess("");
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setStockError("Choose a JPG, PNG, or WebP image.");
+      return;
+    }
+
+    if (file.size === 0 || file.size > MAX_IMAGE_SIZE) {
+      setStockError("Choose an image larger than 0 bytes and no bigger than 5 MB.");
+      return;
+    }
+
+    if (uploadingImageId !== null) return;
+
+    setUploadingImageId(item.id);
+
+    try {
+      // First, upload the photo to Cloudinary.
+      const uploadResult = await uploadMenuItemImage(file);
+
+      if (!uploadResult?.image) {
+        throw new Error("The upload did not return an image URL.");
+      }
+
+      // Next, save the Cloudinary URL in the database.
+      const updatedItem = await updateMenuItemImage(
+        item.id,
+        uploadResult.image
+      );
+
+      // Update the dashboard immediately without a page reload.
+      setStockItems((previous) =>
+        previous.map((currentItem) =>
+          currentItem.id === item.id ? updatedItem : currentItem
+        )
+      );
+
+      setStockSuccess(`Photo updated successfully for ${item.name}.`);
+    } catch (err) {
+      console.error("Food photo update failed:", err);
+      setStockError(err.message || "Unable to update the food photo.");
+    } finally {
+      setUploadingImageId(null);
+    }
+  };
+
 
   // Select a food photo from the computer.
   const handleFoodImageChange = (event) => {
@@ -1155,26 +1215,67 @@ function ManagerDashboard() {
                           </span>
                         </td>
 
-                        <td className="px-3 py-4">
-                          <button
-                            type="button"
-                            onClick={() => handleAvailabilityUpdate(item)}
-                            disabled={
-                              isSaving || savingStockId !== null
-                            }
-                            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                              isAvailable
-                                ? "bg-red-600 hover:bg-red-700"
-                                : "bg-green-600 hover:bg-green-700"
-                            }`}
-                          >
-                            {isSaving
-                              ? "Saving..."
-                              : isAvailable
-                                ? "Mark Unavailable"
-                                : "Mark Available"}
-                          </button>
-                        </td>
+<td className="px-3 py-4">
+  <div className="flex flex-col items-start gap-3">
+    {/* Current food photo */}
+    {item.image ? (
+      <img
+        src={item.image}
+        alt={item.name}
+        className="h-16 w-16 rounded-lg border border-gray-200 object-cover"
+        loading="lazy"
+      />
+    ) : (
+      <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-gray-100 text-xs text-gray-500">
+        No photo
+      </div>
+    )}
+
+    {/* Upload or change food photo */}
+    <label
+      className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${
+        uploadingImageId !== null
+          ? "cursor-not-allowed bg-gray-400"
+          : "cursor-pointer bg-blue-600 hover:bg-blue-700"
+      }`}
+    >
+      {uploadingImageId === item.id
+        ? "Uploading..."
+        : item.image
+          ? "Change Photo"
+          : "Upload Photo"}
+
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        disabled={uploadingImageId !== null}
+        onChange={(event) =>
+          handleExistingFoodImageChange(event, item)
+        }
+      />
+    </label>
+
+    {/* Existing availability button */}
+    <button
+      type="button"
+      onClick={() => handleAvailabilityUpdate(item)}
+      disabled={isSaving || savingStockId !== null}
+      className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        isAvailable
+          ? "bg-red-600 hover:bg-red-700"
+          : "bg-green-600 hover:bg-green-700"
+      }`}
+    >
+      {isSaving
+        ? "Saving..."
+        : isAvailable
+          ? "Mark Unavailable"
+          : "Mark Available"}
+    </button>
+  </div>
+</td>
+
                       </tr>
                     );
                   })}
