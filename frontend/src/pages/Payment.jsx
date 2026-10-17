@@ -9,8 +9,9 @@ import {
   placeOrder,
 } from "../utils/orderHelpers";
 
-const API_ROOT =
-  import.meta.env.VITE_API_ROOT || "http://127.0.0.1:5000/api";
+const API_ROOT = import.meta.env.VITE_API_BASE_URL
+  ? import.meta.env.VITE_API_BASE_URL.replace(/\/menu-items\/?$/, "")
+  : import.meta.env.VITE_API_ROOT || "http://127.0.0.1:5000/api";
 
 function Payment() {
   const navigate = useNavigate();
