@@ -12,6 +12,7 @@ function Navbar() {
     <>
       {/* Menu button — visible on desktop and mobile */}
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="fixed left-4 top-4 z-[60] flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg bg-red-500 shadow-md"
         aria-label={isOpen ? "Close menu" : "Open menu"}
@@ -42,7 +43,7 @@ function Navbar() {
         />
       )}
 
-      {/* Sidebar — hidden until the menu button is clicked */}
+      {/* Customer sidebar */}
       <aside
         className={`fixed left-0 top-0 z-50 flex h-screen w-64 flex-col bg-red-500 p-5 shadow-xl transition-transform duration-300 ${
           isOpen ? "translate-x-0" : "-translate-x-full"
@@ -55,7 +56,7 @@ function Navbar() {
           </span>
         </div>
 
-        {/* Navigation */}
+        {/* Customer navigation */}
         <nav className="flex flex-col gap-4">
           <Link
             to="/menu"
@@ -89,17 +90,6 @@ function Navbar() {
             Games
           </Link>
         </nav>
-
-        {/* Staff Login */}
-        <div className="mt-auto">
-          <Link
-            to="/staff-login"
-            onClick={closeMenu}
-            className="block rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
-          >
-            Staff Login
-          </Link>
-        </div>
       </aside>
     </>
   );

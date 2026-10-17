@@ -54,7 +54,11 @@ def create_order():
     if not isinstance(phone, str) or not phone.strip():
         return jsonify({"error": "Customer phone number is required"}), 400
 
-    if isinstance(table_number, bool) or not isinstance(table_number, int) or table_number < 1:
+    if (
+        isinstance(table_number, bool)
+        or not isinstance(table_number, int)
+        or table_number < 1
+    ):
         return jsonify({"error": "A valid table number is required"}), 400
 
     if payment_method not in ALLOWED_PAYMENT_METHODS:
@@ -77,19 +81,36 @@ def create_order():
         if isinstance(item_id, bool) or not isinstance(item_id, int):
             return jsonify({"error": "Invalid menu item ID"}), 400
 
-        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
-            return jsonify({"error": "Each quantity must be a positive integer"}), 400
+        if (
+            isinstance(quantity, bool)
+            or not isinstance(quantity, int)
+            or quantity < 1
+        ):
+            return jsonify({
+                "error": "Each quantity must be a positive integer"
+            }), 400
 
         menu_item = db.session.get(MenuItem, item_id)
 
-        if menu_item is None or not menu_item.availability:
+        if menu_item is None:
             return jsonify({
-                "error": f"Menu item {item_id} is unavailable"
+                "error": f"Menu item {item_id} was not found"
+            }), 404
+
+        # Prevent ordering meals that the manager marked unavailable.
+        if menu_item.availability is not True:
+            return jsonify({
+                "error": (
+                    f"{menu_item.name} is currently unavailable. "
+                    "Please remove it from your order."
+                )
             }), 400
 
         try:
-            unit_price = Decimal(str(menu_item.price)).quantize(Decimal("0.01"))
-        except InvalidOperation:
+            unit_price = Decimal(
+                str(menu_item.price)
+            ).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError, TypeError):
             return jsonify({"error": "Invalid menu item price"}), 400
 
         total += unit_price * quantity
@@ -136,6 +157,7 @@ def create_order():
         "message": "Order created successfully",
         "order": serialize_order(order),
     }), 201
+
 
 @orders_bp.route("", methods=["GET"])
 def get_orders():

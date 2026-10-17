@@ -12,14 +12,13 @@ export const getMeals = async () => {
 
   const meals = await response.json();
 
-  return meals
-    .filter((meal) => meal.availability)
-    .map((meal) => ({
-      ...meal,
-      id: Number(meal.id),
-      price: Number(meal.price),
-      ingredients: meal.ingredients || [],
-    }));
+  // Keep ALL meals, including unavailable ones.
+  return meals.map((meal) => ({
+    ...meal,
+    id: Number(meal.id),
+    price: Number(meal.price),
+    ingredients: meal.ingredients || [],
+  }));
 };
 
 export const getMealById = async (id) => {

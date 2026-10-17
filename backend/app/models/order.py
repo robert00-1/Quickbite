@@ -1,4 +1,3 @@
-
 from datetime import datetime, timezone
 
 from ..extensions import db
@@ -25,6 +24,25 @@ class Order(db.Model):
         db.String(20),
         nullable=False,
         default="Pending",
+    )
+
+    # The waiter selected to handle this order.
+    assigned_waiter_id = db.Column(
+        db.Integer,
+        db.ForeignKey("waiter_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Snapshot of the waiter who completed service.
+    served_by_name = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    assigned_waiter = db.relationship(
+        "WaiterProfile",
+        foreign_keys=[assigned_waiter_id],
     )
 
     checkout_request_id = db.Column(
