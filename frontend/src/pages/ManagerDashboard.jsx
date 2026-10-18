@@ -119,7 +119,7 @@ function ManagerDashboard() {
   const [waiterFormError, setWaiterFormError] = useState("");
   const [waiterFormSuccess, setWaiterFormSuccess] = useState("");
   const [waiterFormLoading, setWaiterFormLoading] = useState(false);
-
+  const [deletingWaiterId, setDeletingWaiterId] = useState(null);
   const savingStockIdRef = useRef(null);
   const ordersRequestInProgress = useRef(false);
   const stockRequestInProgress = useRef(false);
@@ -490,6 +490,40 @@ function ManagerDashboard() {
       setWaiterFormLoading(false);
     }
   };
+
+const handleDeleteWaiter = async (waiter) => {
+  const confirmed = window.confirm(
+    `Remove ${waiter.full_name} from the active waiter roster?`
+  );
+
+  if (!confirmed) return;
+
+  setDeletingWaiterId(waiter.id);
+  setWaiterFormError("");
+  setWaiterFormSuccess("");
+
+  try {
+    const data = await staffRequest(`/waiter-profiles/${waiter.id}`, {
+      method: "DELETE",
+    });
+
+    setWaiters((previous) =>
+      previous.filter((item) => item.id !== waiter.id)
+    );
+
+    setWaiterFormSuccess(
+      data.message || `${waiter.full_name} was removed successfully.`
+    );
+  } catch (err) {
+    console.error("Remove waiter error:", err);
+    setWaiterFormError(
+      err.message || "Unable to remove this waiter."
+    );
+  } finally {
+    setDeletingWaiterId(null);
+  }
+};
+
 
   // Load waiter roster on mount.
   useEffect(() => {
@@ -1012,16 +1046,29 @@ function ManagerDashboard() {
               No waiter profiles yet. Select Add Waiter to create one.
             </p>
           ) : (
-            <div className="mt-4 flex flex-wrap gap-3">
-              {waiters.map((waiter) => (
-                <span
-                  key={waiter.id}
-                  className="rounded-full bg-blue-50 px-4 py-2 font-medium text-blue-800"
-                >
-                  {waiter.full_name}
-                </span>
-              ))}
-            </div>
+
+<div className="mt-4 flex flex-wrap gap-3">
+  {waiters.map((waiter) => (
+    <div
+      key={waiter.id}
+      className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3"
+    >
+      <span className="font-medium text-blue-800">
+        {waiter.full_name}
+      </span>
+
+      <button
+        type="button"
+        onClick={() => handleDeleteWaiter(waiter)}
+        disabled={deletingWaiterId === waiter.id}
+        className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {deletingWaiterId === waiter.id ? "Removing..." : "Delete"}
+      </button>
+    </div>
+  ))}
+</div>
+
           )}
         </section>
 

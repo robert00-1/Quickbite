@@ -121,3 +121,27 @@ def update_waiter(waiter_id):
         "message": "Waiter updated successfully",
         "waiter": serialize_waiter(waiter),
     }), 200
+
+@waiter_profiles_bp.route("/<int:waiter_id>", methods=["DELETE"])
+@staff_required("manager")
+def delete_waiter(waiter_id):
+    """Remove a waiter from the active roster without deleting history."""
+    waiter = db.session.get(WaiterProfile, waiter_id)
+
+    if waiter is None:
+        return jsonify({"error": "Waiter not found"}), 404
+
+    # Preserve the profile and historical order assignments.
+    waiter.is_active = False
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "error": "Could not remove waiter from the roster"
+        }), 500
+
+    return jsonify({
+        "message": f"{waiter.full_name} was removed from the active roster"
+    }), 200
