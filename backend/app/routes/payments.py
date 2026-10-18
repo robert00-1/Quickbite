@@ -201,8 +201,20 @@ def mpesa_callback():
 
         order.payment_status = "Paid"
         order.mpesa_receipt_number = receipt
+
+        current_app.logger.info(
+            "M-Pesa payment successful: order_id=%s receipt=%s",
+            order.id,
+            receipt,
+        )
     else:
         order.payment_status = "Failed"
+
+        current_app.logger.warning(
+            "M-Pesa payment failed: order_id=%s result_code=%s",
+            order.id,
+            result_code,
+        )
 
     db.session.commit()
 

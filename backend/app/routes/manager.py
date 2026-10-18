@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request
 
 from ..models.order import Order
 from ..utils.auth import staff_required
-
+from sqlalchemy import or_
 
 manager_bp = Blueprint(
     "manager",
@@ -83,8 +83,13 @@ def serialize_order(order):
 
 
 def load_orders():
-    """Load shared orders from the database, newest first."""
-    orders = Order.query.all()
+    """Load confirmed orders, newest first."""
+    orders = Order.query.filter(
+        or_(
+            Order.payment_method != "M-Pesa",
+            Order.payment_status == "Paid",
+        )
+    ).all()
 
     return sorted(
         orders,
@@ -93,8 +98,6 @@ def load_orders():
         ),
         reverse=True,
     )
-
-
 def parse_date(value):
     """Parse YYYY-MM-DD query parameters."""
     if not value:

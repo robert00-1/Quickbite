@@ -4,7 +4,7 @@ from ..extensions import db
 from ..models.order import Order
 from ..models.waiter_profile import WaiterProfile
 from ..utils.auth import staff_required
-
+from sqlalchemy import or_
 
 waiter_bp = Blueprint(
     "waiter",
@@ -55,7 +55,12 @@ def serialize_order(order):
 @waiter_bp.route("/orders", methods=["GET"])
 @staff_required("waiter")
 def get_orders():
-    query = Order.query
+    query = Order.query.filter(
+        or_(
+            Order.payment_method != "M-Pesa",
+            Order.payment_status == "Paid"
+        )
+    )
 
     status = request.args.get("status")
 
