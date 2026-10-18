@@ -1,422 +1,192 @@
-# QUICKBITE - Restaurant Online Ordering System
+# Title
+QuickBite — Restaurant Ordering and Management System
 
-## Project Description
+# Description
+QuickBite is a full-stack restaurant ordering and management application developed as a group project for Moringa School Phase 2. It enables customers to browse meals, place orders, and choose a payment method, while restaurant staff manage orders, food availability, and restaurant performance.
 
-**QUICKBITE** is a React-based restaurant online ordering system that allows customers to browse meals, view food details, select a table, place orders, make a simulated payment, and track their order status.
+## Live Application
 
-The system also provides dedicated dashboards for restaurant staff. Waiters can view and manage incoming orders, while managers can view restaurant order statistics and identify popular meals.
-
-QUICKBITE also includes a mini-games arcade where customers can play games while waiting for their orders.
-
----
+- **Frontend:** https://frontend-three-phi-81.vercel.app/menu
+- **GitHub Repository:** https://github.com/robert00-1/Quickbite
+- **Backend:** Flask REST API connected to PostgreSQL.
 
 ## Features
 
 ### Customer Features
+- Browse restaurant meals, food descriptions, prices, and images.
+- View food details and select quantities.
+- Add meals to the shopping cart.
+- Enter customer and table details during checkout.
+- Choose cash or M-Pesa as a payment method.
+- Submit orders and view order confirmation.
 
-- Browse restaurant meals
-- Search for meals
-- Filter meals by category
-- View detailed meal information
-- Add meals to cart
-- Increase and decrease meal quantities
-- Remove items from cart
-- Clear the cart
-- View order summary and total price
-- Enter customer details
-- Select a restaurant table
-- Select a payment method
-- Simulated payment
-- Receive order confirmation
-- Track order status
-- Play mini-games while waiting for an order
+### Waiter Dashboard
+- View restaurant orders.
+- Monitor order status.
+- Update orders as they move through the preparation process.
+- Manage the workflow from pending to preparing, ready, and served.
 
-### Staff Features
+### Manager Dashboard
+- Monitor total orders, monthly orders, revenue, and popular meals.
+- Add food items to the menu.
+- Upload and update food images using Cloudinary.
+- Mark meals as available or unavailable.
+- Add and manage waiter profiles.
+- Remove waiters from the active roster.
+- Monitor order activity and restaurant performance.
 
-#### Waiter Dashboard
+### M-Pesa Payments
+- Integrate with Safaricom Daraja for M-Pesa STK Push payments.
+- Send payment requests for eligible orders.
+- Receive payment callback notifications.
+- Update payment information based on callback results.
 
-Waiters can:
-
-- View incoming orders
-- Search orders
-- Filter orders by status
-- View customer names
-- View customer phone numbers
-- View table numbers
-- View ordered meals
-- View quantities
-- View order totals
-- Update order status
-
-Order statuses include:
-
-- Pending
-- Preparing
-- Ready
-- Served
-
-#### Manager Dashboard
-
-Managers can:
-
-- View total orders
-- View monthly order statistics
-- View popular meals
-- Monitor restaurant order activity
-
-### Mini-Games Arcade
-
-The Games section provides several games for customers:
-
-- Food Trivia
-- Quick Trivia
-- Pokémon Guess
-- Memory Match
-- Rock Paper Scissors
-- Number Challenge
-
-The trivia games use the **Open Trivia DB API**, while the Pokémon game uses **PokéAPI**.
-
----
+**Note:** M-Pesa sandbox testing and production payment processing are different. Production transactions require the appropriate Safaricom credentials and configuration.
 
 ## Technologies Used
 
-### Frontend
-
-- React
-- JavaScript
-- HTML
-- Tailwind CSS
-- React Router
-
-### APIs
-
-- TheMealDB
-- Open Trivia DB
-- PokéAPI
-
-### Storage
-
-- Browser LocalStorage
-
-### Development Tools
-
-- Vite
-- Git
-- GitHub
-- VS Code
-
----
-
-## APIs Used
-
-### TheMealDB
-
-TheMealDB provides the meal data used throughout the QUICKBITE menu.
-
-It is used for:
-
-- Meal names
-- Meal images
-- Meal categories
-- Meal descriptions
-- Meal details
-
-### Open Trivia DB
-
-Open Trivia DB provides questions for the trivia games.
-
-It is used for:
-
-- Food Trivia
-- Quick Trivia
-
-### PokéAPI
-
-PokéAPI provides Pokémon data and images for the Pokémon Guess game.
-
----
-
-## Application Routes
-
-| Route | Page | Description |
-|---|---|---|
-| `/` | Menu | Redirects to the menu |
-| `/menu` | Menu | Browse and search meals |
-| `/menu/:id` | Food Details | View meal information |
-| `/cart` | Cart | View selected meals |
-| `/customer-details` | Customer Details | Enter customer information |
-| `/checkout` | Checkout | Review order |
-| `/payment` | Payment | Complete simulated payment |
-| `/order-confirmation` | Order Confirmation | View submitted order |
-| `/order-status` | Order Status | Track order progress |
-| `/games` | Games | Play mini-games |
-| `/staff-login` | Staff Login | Staff access |
-| `/waiter` | Waiter Dashboard | Manage customer orders |
-| `/manager` | Manager Dashboard | View restaurant statistics |
-
----
-## Deployment
-
-The QUICKBITE frontend is deployed on Vercel.
-
-**Live Application:** [QUICKBITE Live Demo](https://quickbite-dusky-tau.vercel.app/menu)
-
-## APIs Used
-
-### TheMealDB
-
-Used to retrieve restaurant meal data, including meal names, images, categories, and descriptions.
-
-**API:** [TheMealDB](https://www.themealdb.com/documentation)
-
-### Open Trivia DB
-
-Used for the trivia games in the Games section.
-
-**API:** [Open Trivia DB](https://opentdb.com/api_config.php)
-
-### PokéAPI
-
-Used for the Pokémon guessing game and Pokémon artwork.
-
-**API:** [PokéAPI](https://pokeapi.co/docs/v2)
-
----
-
-## Customer Ordering Flow
-
-```text
-Browse Menu
-     ↓
-View Food Details
-     ↓
-Add to Cart
-     ↓
-View Cart
-     ↓
-Enter Customer Details
-     ↓
-Checkout
-     ↓
-Payment
-     ↓
-Order Confirmation
-     ↓
-Order Status
-```
-
----
-
-## Staff Flow
-
-```text
-Staff Login
-     ↓
-Choose Staff Role
-     ↓
-Waiter Dashboard / Manager Dashboard
-```
-
-### Waiter
-
-```text
-View Orders
-     ↓
-Search / Filter Orders
-     ↓
-Update Order Status
-     ↓
-Pending → Preparing → Ready → Served
-```
-
-### Manager
-
-```text
-View Order Statistics
-     ↓
-View Monthly Orders
-     ↓
-View Popular Meals
-```
-
----
-
-## Games Flow
-
-```text
-Games
-  ↓
-Choose a Game
-  ↓
-Play
-  ↓
-Receive Score / Result
-  ↓
-Play Again or Choose Another Game
-```
-
----
+| Technology | Purpose |
+|---|---|
+| React and JavaScript | Frontend user interface |
+| Vite | Frontend development and build tooling |
+| Tailwind CSS | Styling and responsive layouts |
+| Flask | Backend REST API |
+| PostgreSQL | Relational database |
+| SQLAlchemy | Database models and queries |
+| Flask-Migrate | Database schema migrations |
+| Safaricom Daraja API | M-Pesa payment integration |
+| Cloudinary | Food image storage and delivery |
+| Vercel | Frontend deployment |
+| Render | Backend deployment |
 
 ## Project Structure
 
-```text
-quickbite/
-├── public/
-│
+
+Quickbite/
+├── backend/
+│   ├── app/
+│   │   ├── models/
+│   │   └── routes/
+│   ├── requirements.txt
+│   ├── run.py
+│   └── ...
 ├── src/
 │   ├── components/
-│   │   ├── cart/
-│   │   │   ├── CartItem.jsx
-│   │   │   └── OrderSummary.jsx
-│   │   │
-│   │   ├── customer/
-│   │   │   ├── CustomerForm.jsx
-│   │   │   ├── TableSelector.jsx
-│   │   │   └── TableCard.jsx
-│   │   │
-│   │   └── Navbar.jsx
-│   │
-│   ├── context/
-│   │   └── CartContext.jsx
-│   │
 │   ├── pages/
-│   │   ├── Menu.jsx
-│   │   ├── FoodDetails.jsx
-│   │   ├── Cart.jsx
-│   │   ├── CustomerDetails.jsx
-│   │   ├── Checkout.jsx
-│   │   ├── Payment.jsx
-│   │   ├── OrderConfirmation.jsx
-│   │   ├── OrderStatus.jsx
-│   │   ├── Games.jsx
-│   │   ├── StaffLogin.jsx
-│   │   ├── WaiterDashboard.jsx
-│   │   └── ManagerDashboard.jsx
-│   │
 │   ├── services/
-│   │   └── api.js
-│   │
-│   ├── utils/
-│   │   └── orderHelpers.js
-│   │
-│   ├── App.jsx
-│   ├── main.jsx
-│   └── index.css
-│
+│   └── App.jsx
+├── public/
 ├── package.json
-├── package-lock.json
-├── README.md
-└── vite.config.js
-```
+└── README.md
 
----
 
-## User Interface
+## Getting Started
 
-QUICKBITE uses a red and white restaurant-themed design.
+### Prerequisites
 
-The application includes:
+Install the following before running the application locally:
 
-- Fixed left-side navigation
-- Responsive meal card grid
-- Food images
-- Food detail pages
-- Shopping cart
-- Checkout pages
-- Staff dashboards
-- Order tracking
-- Games grid
-- Responsive layouts
+- Node.js and npm
+- Python
+- PostgreSQL
+- Git
+- Pipenv, if using the project's Pipenv environment
 
----
+### 1. Clone the repository
 
-## Data Storage
 
-During Phase 1, QUICKBITE uses **LocalStorage** to temporarily store:
-
-- Cart items
-- Customer information
-- Orders
-- Order statuses
-
-This allows the frontend application to demonstrate the complete ordering flow without requiring a backend database.
-
-The LocalStorage implementation will be replaced or integrated with the Flask backend during later project phases.
-
----
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone <repository-url>
-```
-
-Navigate into the project:
-
-```bash
+git clone https://github.com/robert00-1/Quickbite.git
 cd Quickbite
-```
 
-Install dependencies:
 
-```bash
+### 2. Set up the frontend
+
+
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
-```
 
-The application will then be available through the local Vite development server.
 
----
+Vite will display the local development URL in the terminal.
 
-## Team Project Development
+To create a production build:
 
-The project uses Git and GitHub for collaborative development.
 
-Each team member works on a separate feature branch before changes are merged into the main branch.
+npm run build
 
-Example:
 
-```bash
-git switch -c feature/feature-name
-```
+### 3. Set up the backend
 
-After completing a feature:
+Open a second terminal from the project root:
 
-```bash
-git add .
-git commit -m "Describe the changes"
-git push origin feature/feature-name
-```
 
-The completed feature can then be merged into the main branch.
+cd backend
+pipenv install -r requirements.txt
 
----
 
-## Future Development
+Configure the backend environment variables for the PostgreSQL database, staff authentication, Cloudinary, and Safaricom Daraja credentials. Use the project's existing configuration and environment-variable names.
 
-The next development phases will extend QUICKBITE with:
+Create or configure the PostgreSQL database, then apply the project's migrations if required:
 
-- Flask backend
-- Database integration
-- User authentication
-- User-owned orders
-- Persistent restaurant data
-- Real payment integration
-- Improved staff authentication
-- Additional restaurant management features
 
----
+pipenv run flask db upgrade
 
-## Project Goal
 
-The goal of QUICKBITE is to provide a complete restaurant ordering experience that connects customers, waiters, and managers through a single web application.
+Start the backend using the project's entry point:
 
-The project demonstrates frontend development, API integration, state management, routing, LocalStorage, responsive UI design, and collaborative Git/GitHub development.
+
+pipenv run python run.py
+
+
+Use the port and host configured in the backend. Ensure the frontend is configured to communicate with the correct backend URL.
+
+**Security:** Never commit `.env` files, database passwords, API secrets, access tokens, or production credentials to GitHub.
+
+## Main API Endpoints
+
+The backend exposes REST API endpoints for menu management, ordering, waiter profiles, and payments.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/menu-items` | Retrieve menu items |
+| POST | `/api/menu-items` | Create a menu item |
+| GET | `/api/orders` | Retrieve orders, subject to the endpoint's access rules |
+| POST | `/api/orders` | Create an order |
+| POST | `/api/payments/stk-push` | Initiate an M-Pesa STK Push |
+| POST | `/api/payments/callback` | Receive Daraja payment callbacks |
+| GET | `/api/waiter-profiles` | Retrieve active waiter profiles |
+| POST | `/api/waiter-profiles` | Add a waiter profile |
+| PATCH | `/api/waiter-profiles/:waiter_id` | Update waiter profile status |
+| DELETE | `/api/waiter-profiles/:waiter_id` | Deactivate a waiter profile |
+
+Staff-only endpoints require the appropriate authentication and role permissions. The exact supported request fields and response formats are defined in the backend route implementations.
+
+## Contributors and Responsibilities
+
+This project was developed collaboratively, with each team member responsible for a major application feature.
+
+| Contributor | Responsibility |
+|---|---|
+| **Alma** | Menu development and API integration |
+| **Irene** | Shopping cart functionality |
+| **Robert** | Checkout and payment integration, including M-Pesa |
+| **Jacob** | Waiter dashboard and order-status workflow |
+| **Martin** | Manager dashboard and restaurant management features |
+
+## Challenges and Learning Outcomes
+
+During development, the team worked on integrating the frontend with a Flask backend, connecting PostgreSQL models and routes, coordinating Git branches, handling order-status updates, integrating M-Pesa callbacks, and uploading food images to Cloudinary.
+
+The project provided practical experience in full-stack development, REST API integration, database management, payment workflows, deployment, collaborative Git workflows, and role-based access control.
+
+## Future Improvements
+
+- Add automated tests for frontend and backend workflows.
+- Improve dashboard performance and monitoring.
+- Expand inventory tracking and low-stock alerts.
+- Strengthen payment reconciliation and transaction reporting.
+- Improve accessibility and responsive design.
+- Add more comprehensive deployment and API documentation.
+
+## License
+
+This project was developed for educational purposes as part of the Moringa School software engineering program.
