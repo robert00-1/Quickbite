@@ -1,8 +1,8 @@
+
 from datetime import datetime, timedelta, timezone
-import hashlib
 import secrets
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 from werkzeug.security import (
     check_password_hash,
     generate_password_hash,
@@ -10,7 +10,11 @@ from werkzeug.security import (
 
 from ..extensions import db
 from ..models.user import User, StaffSession
-from ..utils.auth import staff_required
+from ..utils.auth import (
+    create_csrf_token,
+    hash_token,
+    staff_required,
+)
 
 
 auth_bp = Blueprint(
@@ -19,12 +23,59 @@ auth_bp = Blueprint(
     url_prefix="/api/auth",
 )
 
-SESSION_HOURS = 8
+
+def allowed_origins():
+    """Return the browser origins allowed to use staff authentication."""
+    origins = {
+        current_app.config["FRONTEND_ORIGIN"].rstrip("/"),
+    }
+
+    if not current_app.config["SESSION_COOKIE_SECURE"]:
+        origins.update({
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        })
+
+    return origins
+
+
+def origin_is_allowed():
+    """Validate the origin of a browser authentication request."""
+    origin = request.headers.get("Origin", "").rstrip("/")
+    return bool(origin) and origin in allowed_origins()
+
+
+def clear_staff_cookies(response):
+    """Clear both cookies using the same settings used to create them."""
+    secure = current_app.config["SESSION_COOKIE_SECURE"]
+
+    response.delete_cookie(
+        current_app.config["STAFF_SESSION_COOKIE"],
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="Lax",
+    )
+
+    response.delete_cookie(
+        current_app.config["STAFF_CSRF_COOKIE"],
+        path="/",
+        secure=secure,
+        httponly=False,
+        samesite="Lax",
+    )
+
+    return response
 
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    """Authenticate a staff member and create a session."""
+    """Authenticate staff and create an eight-hour cookie session."""
+    if not origin_is_allowed():
+        return jsonify({
+            "error": "Login request origin is not allowed."
+        }), 403
+
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -42,7 +93,9 @@ def login():
     username = username.strip().lower()
 
     if len(username) > 80:
-        return jsonify({"error": "Invalid username or password"}), 401
+        return jsonify({
+            "error": "Invalid username or password"
+        }), 401
 
     user = User.query.filter_by(username=username).first()
 
@@ -55,16 +108,12 @@ def login():
             "error": "Invalid username or password"
         }), 401
 
-    # Generate a unique token for this browser session.
+    session_hours = current_app.config["STAFF_SESSION_HOURS"]
     token = secrets.token_urlsafe(48)
-
-    # Store only the token hash in the database.
-    token_hash = hashlib.sha256(
-        token.encode("utf-8")
-    ).hexdigest()
+    token_hash = hash_token(token)
 
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(hours=SESSION_HOURS)
+    expires_at = now + timedelta(hours=session_hours)
 
     staff_session = StaffSession(
         user_id=user.id,
@@ -82,9 +131,11 @@ def login():
             "error": "Could not complete login"
         }), 500
 
-    return jsonify({
-        "access_token": token,
-        "token_type": "Bearer",
+    csrf_token = create_csrf_token(token_hash)
+    secure = current_app.config["SESSION_COOKIE_SECURE"]
+
+    response = jsonify({
+        "message": "Login successful",
         "expires_at": expires_at.isoformat(),
         "user": {
             "id": user.id,
@@ -92,7 +143,29 @@ def login():
             "username": user.username,
             "role": user.role,
         },
-    }), 200
+    })
+
+    response.set_cookie(
+        current_app.config["STAFF_SESSION_COOKIE"],
+        token,
+        max_age=session_hours * 60 * 60,
+        httponly=True,
+        secure=secure,
+        samesite="Lax",
+        path="/",
+    )
+
+    response.set_cookie(
+        current_app.config["STAFF_CSRF_COOKIE"],
+        csrf_token,
+        max_age=session_hours * 60 * 60,
+        httponly=False,
+        secure=secure,
+        samesite="Lax",
+        path="/",
+    )
+
+    return response, 200
 
 
 @auth_bp.route("/me", methods=["GET"])
@@ -112,7 +185,7 @@ def current_staff():
 @auth_bp.route("/logout", methods=["POST"])
 @staff_required("waiter", "manager")
 def logout():
-    """Revoke the current staff session."""
+    """Revoke the current session and clear its cookies."""
     staff_session = g.staff_session
     staff_session.revoked_at = datetime.now(timezone.utc)
 
@@ -124,9 +197,11 @@ def logout():
             "error": "Could not log out"
         }), 500
 
-    return jsonify({
+    response = jsonify({
         "message": "Logged out successfully"
-    }), 200
+    })
+
+    return clear_staff_cookies(response), 200
 
 
 @auth_bp.route("/staff", methods=["POST"])
