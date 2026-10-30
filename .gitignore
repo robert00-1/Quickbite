@@ -36,3 +36,15 @@ __pycache__/
 # Local virtual environments
 venv/
 .venv/
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+backend/venv/
+
+# Python cache
+__pycache__/
+*.pyc
