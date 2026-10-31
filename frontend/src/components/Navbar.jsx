@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useCart } from "../context/CartContext";
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const { cart } = useCart();
+
+  const cartItemCount = cart.reduce(
+  (total, item) => total + item.quantity,
+  0
+  );
 
   const closeMenu = () => {
     setIsOpen(false);
@@ -58,21 +65,19 @@ function Navbar() {
 
         {/* Customer navigation */}
         <nav className="flex flex-col gap-4">
-          <Link
-            to="/menu"
-            onClick={closeMenu}
-            className="rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
+         <Link
+           to="/cart"
+           onClick={closeMenu}
+           className="relative rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
           >
-            Menu
-          </Link>
+         <span>🛒 Cart</span>
 
-          <Link
-            to="/cart"
-            onClick={closeMenu}
-            className="rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
-          >
-            Cart
-          </Link>
+         {cartItemCount > 0 && (
+           <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-bold text-white">
+            {cartItemCount}
+           </span>
+         )}
+        </Link>
 
           <Link
             to="/order-status"
