@@ -11,7 +11,10 @@ import CategoryFilter from "../components/menu/CategoryFilter";
 function Menu() {
   const [meals, setMeals] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -49,6 +52,14 @@ function Menu() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const categories = [
     ...new Set(meals.map((meal) => meal.category).filter(Boolean)),
   ];
@@ -56,13 +67,24 @@ function Menu() {
   const filteredMeals = meals.filter((meal) => {
     const matchesSearch = (meal.name ?? "")
       .toLowerCase()
-      .includes(searchTerm.toLowerCase());
+      .includes(debouncedSearchTerm.toLowerCase());
 
     const matchesCategory =
       selectedCategory === "All" ||
       meal.category === selectedCategory;
 
-    return matchesSearch && matchesCategory;
+    const matchesMinPrice =
+      minPrice === "" || meal.price >= Number(minPrice);
+
+    const matchesMaxPrice =
+      maxPrice === "" || meal.price <= Number(maxPrice);  
+
+    return (
+      matchesSearch &&
+      matchesCategory &&
+      matchesMinPrice &&
+      matchesMaxPrice
+           );
   });
 
   if (loading) {
@@ -88,19 +110,41 @@ function Menu() {
         </Link>
       </div>
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row">
+      <div className="mb-8 flex flex-col gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
         <SearchBar
-          searchTerm={searchTerm}
-          onSearch={setSearchTerm}
-        />
+        searchTerm={searchTerm}
+        onSearch={setSearchTerm}
+         />
 
-        <CategoryFilter
-          categories={categories}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-        />
+      <CategoryFilter
+        categories={categories}
+      selectedCategory={selectedCategory}
+      onCategoryChange={setSelectedCategory}
+      />
+     </div>
+
+     <div className="flex flex-col gap-4 sm:flex-row">
+    <input
+      type="number"
+      min="0"
+      placeholder="Minimum price"
+      value={minPrice}
+      onChange={(event) => setMinPrice(event.target.value)}
+      className="w-full rounded-lg border-2 border-gray-200 bg-white px-4 py-3 text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-red-500 sm:w-auto"
+    />
+
+     <input
+      type="number"
+      min="0"
+      placeholder="Maximum price"
+      value={maxPrice}
+      onChange={(event) => setMaxPrice(event.target.value)}
+      className="w-full rounded-lg border-2 border-gray-200 bg-white px-4 py-3 text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-red-500 sm:w-auto"
+      />
       </div>
-
+      </div>
+      
       {error && (
         <p className="mb-4 text-sm text-red-600">{error}</p>
       )}
