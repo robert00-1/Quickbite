@@ -1,7 +1,6 @@
-
 import { Link } from "react-router-dom";
 
-function FoodCard({ food }) {
+function FoodCard({ food, onCompare, isSelected }) {
   const isAvailable = food.availability !== false;
 
   return (
@@ -40,17 +39,24 @@ function FoodCard({ food }) {
         </div>
 
         <div className="p-[15px]">
-          <h3 className="mt-0 font-bold text-gray-800">
-            {food.name}
-          </h3>
+          <h3 className="mt-0 font-bold text-gray-800">{food.name}</h3>
 
-          <p className="my-2 text-gray-600">
-            {food.category}
-          </p>
+          <p className="my-2 text-gray-600">{food.category}</p>
 
-          <p className="my-2 font-bold text-red-500">
-            KSh {food.price}
-          </p>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              onCompare(food);
+            }}
+            className={`mt-3 w-full rounded-lg px-4 py-2 font-semibold transition ${
+              isSelected
+                ? "bg-gray-700 text-white"
+                : "bg-blue-500 text-white hover:bg-blue-600"
+            }`}
+          >
+            {isSelected ? "Remove from Compare" : "Compare"}
+          </button>
 
           {!isAvailable && (
             <p className="mt-3 text-sm font-medium text-red-600">

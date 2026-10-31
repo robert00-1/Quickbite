@@ -5,6 +5,7 @@ import {
   Navigate,
 } from "react-router-dom";
 
+import { CartProvider } from "./context/CartContext";
 import Menu from "./pages/Menu";
 import FoodDetails from "./pages/FoodDetails";
 import CustomerDetails from "./pages/CustomerDetails";
@@ -22,6 +23,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
+     <CartProvider>
     <BrowserRouter>
       <Navbar />
 
@@ -97,6 +99,7 @@ function App() {
         </Routes>
       </main>
     </BrowserRouter>
+     </CartProvider>
   );
 }
 
