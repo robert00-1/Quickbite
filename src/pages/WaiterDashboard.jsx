@@ -25,11 +25,12 @@ function WaiterDashboard() {
 
   // Ask the backend for fresh orders every few seconds
   useEffect(() => {
-    loadOrders();
+    const first = setTimeout(loadOrders, 0);
 
     const interval = setInterval(loadOrders, REFRESH_MS);
 
     return () => {
+      clearTimeout(first);
       clearInterval(interval);
     };
   }, [loadOrders]);

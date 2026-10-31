@@ -47,3 +47,53 @@ export const updateWaiterOrderStatus = async (id, status) => {
 
   return toScreenOrder(await response.json());
 };
+
+export const startWaiterShift = async (waiterId) => {
+  const response = await fetch(`${WAITER_API_URL}/shifts/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ waiter_id: waiterId }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to start shift");
+  }
+
+  return response.json();
+};
+
+export const endWaiterShift = async (waiterId) => {
+  const response = await fetch(`${WAITER_API_URL}/shifts/end`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ waiter_id: waiterId }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to end shift");
+  }
+
+  return response.json();
+};
+
+export const getWaiterRecord = async (waiterId) => {
+  const response = await fetch(`${WAITER_API_URL}/${waiterId}/record`);
+
+  if (!response.ok) {
+    throw new Error("Failed to load your record");
+  }
+
+  return response.json();
+};
+
+export const getWaiterRoster = async () => {
+  const response = await fetch(`${WAITER_API_URL}/roster`);
+
+  if (!response.ok) {
+    throw new Error("Failed to load the roster");
+  }
+
+  return response.json();
+};
