@@ -8,6 +8,9 @@ const toTitleCase = (text) =>
 
 const toScreenOrder = (order) => ({
   id: String(order.id),
+  preparationMinutes: order.preparationMinutes,
+  servingMinutes: order.servingMinutes,
+  receiptUrl: order.receipt_url,
   customerName: order.customer || "",
   phone: order.phone || "",
   tableNumber: order.table_number,
@@ -41,7 +44,7 @@ export const updateWaiterOrderStatus = async (id, status) => {
   return toScreenOrder(order);
 };
 
-// These endpoints will be implemented securely in the backend.
+// These endpoints identify staff from the authenticated backend session.
 // They identify the waiter from the authenticated staff session.
 export const startWaiterShift = () =>
   staffRequest("/waiter/shifts/start", {

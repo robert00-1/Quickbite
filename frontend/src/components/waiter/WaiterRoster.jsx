@@ -61,7 +61,7 @@ function WaiterRoster() {
                 </p>
 
                 <p className="text-sm text-gray-500">
-                  Since {formatTime(waiter.on_shift_since)} ·{" "}
+                  {waiter.status === "OFF_SHIFT" ? "Off shift" : `Since ${formatTime(waiter.on_shift_since)}`} ·{" "}
                   {waiter.hours_so_far} hrs
                 </p>
 

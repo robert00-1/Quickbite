@@ -5,3 +5,6 @@ from .user import User, StaffSession
 from .waiter_profile import WaiterProfile
 from .shift import Shift
 from .weekly_shift import WeeklyShift
+from .receipt import Receipt
+from .complaint import Complaint
+from .payment import Payment

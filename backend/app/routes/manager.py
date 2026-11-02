@@ -904,27 +904,72 @@ def deactivate_weekly_shift(shift_id):
 
 @manager_bp.get("/food-of-the-day")
 def get_food_of_the_day():
-    meal = MenuItem.query.filter_by(is_food_of_day=True).first()
+    """Return all items currently marked as Meal of the Day."""
+    meals = MenuItem.query.filter_by(is_food_of_day=True).all()
+    return jsonify([{
+        "id": m.id,
+        "name": m.name,
+        "description": m.description,
+        "price": float(m.price),
+        "image": m.image,
+        "category": m.category,
+        "ingredients": m.ingredients or [],
+        "availability": m.availability,
+        "is_food_of_day": m.is_food_of_day,
+    } for m in meals]), 200
 
+
+@manager_bp.post("/food-of-the-day")
+@staff_required("manager")
+def add_food_of_the_day():
+    """Add an item to Meal of the Day without clearing others."""
+    data = request.get_json(silent=True) or {}
+    meal_id = data.get("meal_id")
+
+    if meal_id is None:
+        return jsonify({"error": "meal_id is required"}), 400
+
+    meal = db.session.get(MenuItem, meal_id)
     if meal is None:
-        return jsonify({"message": "No Food of the Day selected"}), 404
+        return jsonify({"error": "Menu item not found"}), 404
 
-    return jsonify({
-        "id": meal.id,
-        "name": meal.name,
-        "description": meal.description,
-        "price": float(meal.price),
-        "image": meal.image,
-        "category": meal.category,
-        "ingredients": meal.ingredients or [],
-        "availability": meal.availability,
-        "is_food_of_day": meal.is_food_of_day,
-    }), 200
+    if not meal.availability:
+        return jsonify({"error": "Cannot select an unavailable meal"}), 400
+
+    try:
+        meal.is_food_of_day = True
+        db.session.commit()
+        return jsonify({
+            "message": "Added to Meal of the Day",
+            "meal_id": meal.id,
+            "name": meal.name,
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Could not update Meal of the Day"}), 500
+
+
+@manager_bp.delete("/food-of-the-day/<int:meal_id>")
+@staff_required("manager")
+def remove_food_of_the_day(meal_id):
+    """Remove an item from Meal of the Day."""
+    meal = db.session.get(MenuItem, meal_id)
+    if meal is None:
+        return jsonify({"error": "Menu item not found"}), 404
+
+    try:
+        meal.is_food_of_day = False
+        db.session.commit()
+        return jsonify({"message": "Removed from Meal of the Day", "meal_id": meal.id}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Could not update Meal of the Day"}), 500
 
 
 @manager_bp.put("/food-of-the-day")
 @staff_required("manager")
 def set_food_of_the_day():
+    """Alias PUT — sets a meal as Meal of the Day (does NOT reset others)."""
     data = request.get_json(silent=True) or {}
     meal_id = data.get("meal_id")
 
@@ -940,10 +985,6 @@ def set_food_of_the_day():
         return jsonify({"error": "Cannot select an unavailable meal"}), 400
 
     try:
-        MenuItem.query.update(
-            {MenuItem.is_food_of_day: False},
-            synchronize_session=False,
-        )
         meal.is_food_of_day = True
         db.session.commit()
 
@@ -956,3 +997,43 @@ def set_food_of_the_day():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Could not update Food of the Day"}), 500
+
+
+
+# =========================================================
+# LATE ORDERS
+# =========================================================
+
+@manager_bp.get("/late-orders")
+@staff_required("manager")
+def get_late_orders():
+    """Return orders that have exceeded their expected serving time."""
+    from ..utils.timing import estimates, utc
+    now = datetime.now(timezone.utc)
+    result = []
+    for order in Order.query.all():
+        timing = estimates(order)
+        if timing["isLate"]:
+            result.append({**serialize_order(order), **timing,
+                "elapsed_minutes": round((now - utc(order.created_at)).total_seconds()/60, 1),
+                "expected_minutes": timing["preparationMinutes"] + timing["servingMinutes"]})
+    return jsonify(result), 200
+
+
+# =========================================================
+# WAITER ACTIVITY
+# =========================================================
+
+@manager_bp.get("/waiter-activity")
+@staff_required("manager")
+def get_waiter_activity():
+    """Return all waiter profiles with their shift hours and served orders."""
+    from ..services.activity import activity
+    result = []
+    for waiter in WaiterProfile.query.filter_by(is_active=True).all():
+        record = activity(waiter.user_id, waiter)
+        active = next((s for s in record["shifts"] if s["is_active"]), None)
+        result.append({"id": waiter.id, "name": waiter.full_name, **record,
+            "on_shift": active is not None, "recent_shifts": record["shifts"],
+            "shift_started_at": active["started_at"] if active else None})
+    return jsonify(result), 200

@@ -1,6 +1,6 @@
 
 from datetime import datetime, timedelta, timezone
-import secrets
+from flask_jwt_extended import create_access_token
 
 from flask import Blueprint, current_app, g, jsonify, request
 from werkzeug.security import (
@@ -48,13 +48,14 @@ def origin_is_allowed():
 def clear_staff_cookies(response):
     """Clear both cookies using the same settings used to create them."""
     secure = current_app.config["SESSION_COOKIE_SECURE"]
+    samesite = current_app.config.get("SESSION_COOKIE_SAMESITE", "Lax")
 
     response.delete_cookie(
         current_app.config["STAFF_SESSION_COOKIE"],
         path="/",
         secure=secure,
         httponly=True,
-        samesite="Lax",
+        samesite=samesite,
     )
 
     response.delete_cookie(
@@ -62,7 +63,7 @@ def clear_staff_cookies(response):
         path="/",
         secure=secure,
         httponly=False,
-        samesite="Lax",
+        samesite=samesite,
     )
 
     return response
@@ -109,7 +110,7 @@ def login():
         }), 401
 
     session_hours = current_app.config["STAFF_SESSION_HOURS"]
-    token = secrets.token_urlsafe(48)
+    token = create_access_token(identity=str(user.id), expires_delta=timedelta(hours=session_hours), additional_claims={"role": user.role})
     token_hash = hash_token(token)
 
     now = datetime.now(timezone.utc)
@@ -133,10 +134,12 @@ def login():
 
     csrf_token = create_csrf_token(token_hash)
     secure = current_app.config["SESSION_COOKIE_SECURE"]
+    samesite = current_app.config.get("SESSION_COOKIE_SAMESITE", "Lax")
 
     response = jsonify({
         "message": "Login successful",
         "expires_at": expires_at.isoformat(),
+        "csrf_token": csrf_token,
         "user": {
             "id": user.id,
             "full_name": user.full_name or "",
@@ -151,7 +154,7 @@ def login():
         max_age=session_hours * 60 * 60,
         httponly=True,
         secure=secure,
-        samesite="Lax",
+        samesite=samesite,
         path="/",
     )
 
@@ -161,11 +164,20 @@ def login():
         max_age=session_hours * 60 * 60,
         httponly=False,
         secure=secure,
-        samesite="Lax",
+        samesite=samesite,
         path="/",
     )
 
     return response, 200
+
+
+@auth_bp.route("/csrf", methods=["GET"])
+@staff_required("waiter", "manager")
+def get_csrf():
+    """Return a fresh CSRF token for the authenticated staff session."""
+    session_hash = g.staff_session.token_hash
+    token = create_csrf_token(session_hash)
+    return jsonify({"csrf_token": token}), 200
 
 
 @auth_bp.route("/me", methods=["GET"])
@@ -268,6 +280,14 @@ def create_staff():
 
     try:
         db.session.add(user)
+        db.session.flush()
+        if role == "waiter":
+            from ..models.waiter_profile import WaiterProfile
+            profile = WaiterProfile.query.filter_by(full_name=full_name, user_id=None).first()
+            if profile:
+                profile.user_id = user.id
+            else:
+                db.session.add(WaiterProfile(full_name=full_name, user_id=user.id))
         db.session.commit()
     except Exception:
         db.session.rollback()

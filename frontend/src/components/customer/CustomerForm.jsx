@@ -16,6 +16,10 @@ function CustomerForm({ customer, setCustomer, onContinue }) {
       return;
     }
 
+    if (!/^[A-Z][1-9][0-9]?$/.test(String(customer.tableNumber).trim().toUpperCase())) {
+      alert("Use a table number such as A1 or B2.");
+      return;
+    }
     onContinue();
   };
 
@@ -30,13 +34,15 @@ function CustomerForm({ customer, setCustomer, onContinue }) {
 
       {/* Full Name */}
       <div className="mb-5">
-        <label className="mb-2 block font-semibold text-gray-700">
+        <label htmlFor="fullName" className="mb-2 block font-semibold text-gray-700">
           Full Name
         </label>
 
         <input
           type="text"
           name="fullName"
+          id="fullName"
+          required
           value={customer.fullName}
           onChange={handleChange}
           placeholder="Enter your full name"
@@ -46,13 +52,15 @@ function CustomerForm({ customer, setCustomer, onContinue }) {
 
       {/* Phone Number */}
       <div className="mb-5">
-        <label className="mb-2 block font-semibold text-gray-700">
+        <label htmlFor="phone" className="mb-2 block font-semibold text-gray-700">
           Phone Number
         </label>
 
         <input
           type="tel"
           name="phone"
+          id="phone"
+          required
           value={customer.phone}
           onChange={handleChange}
           placeholder="Enter your phone number"
@@ -62,18 +70,21 @@ function CustomerForm({ customer, setCustomer, onContinue }) {
 
       {/* Table Number */}
       <div className="mb-6">
-        <label className="mb-2 block font-semibold text-gray-700">
+        <label htmlFor="tableNumber" className="mb-2 block font-semibold text-gray-700">
           Table Number
         </label>
 
         <input
-          type="number"
+          type="text"
           name="tableNumber"
+          id="tableNumber"
+          required
           value={customer.tableNumber}
           onChange={handleChange}
-          placeholder="Enter your table number"
-          min="1"
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-red-500"
+          placeholder="e.g. A1 or B2"
+          pattern="[A-Za-z][1-9][0-9]?"
+          title="Use a table number such as A1 or B2"
+          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-red-500 uppercase"
         />
       </div>
 

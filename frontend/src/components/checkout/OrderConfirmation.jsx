@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { API_ROOT } from "../../services/staffApi";
 
 function OrderConfirmation({ order }) {
   return (
@@ -42,6 +43,8 @@ function OrderConfirmation({ order }) {
         <span>KES {order.total}</span>
       </div>
 
+      <p className="mt-4">Preparation: {order.preparationMinutes} min · Serving: {order.servingMinutes} min</p>
+      {order.receiptUrl && <a className="mt-4 block font-bold text-red-500" href={`${API_ROOT.replace(/\/api$/, "")}${order.receiptUrl}/view`} target="_blank" rel="noreferrer">View / Print receipt</a>}
       <Link
         to="/menu"
         className="mt-6 inline-block rounded-lg bg-red-500 px-6 py-3 font-bold text-white transition hover:bg-red-600"

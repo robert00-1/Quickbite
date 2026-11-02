@@ -1,12 +1,18 @@
 
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from ..extensions import db
 from ..models.menu_item import MenuItem
 from ..models.order import Order
 from ..models.order_item import OrderItem
+import re
+from ..utils.auth import staff_required
+from ..utils.customer import ensure_customer, owns_order
+from ..utils.timing import estimates, utc
+from ..services.notifications import confirm_receipt
+from .payments import normalize_phone
 
 
 orders_bp = Blueprint("orders", __name__, url_prefix="/api/orders")
@@ -16,6 +22,7 @@ ALLOWED_PAYMENT_METHODS = {"M-Pesa", "Cash", "Card"}
 
 def serialize_order(order):
     return {
+        **estimates(order),
         "id": order.id,
         "customerName": order.customer_name,
         "phone": order.phone,
@@ -26,6 +33,8 @@ def serialize_order(order):
                 "name": item.item_name,
                 "quantity": item.quantity,
                 "price": float(item.unit_price),
+                "preparationTime": item.preparation_time,
+                "servingTime": item.serving_time,
             }
             for item in order.items
         ],
@@ -33,8 +42,12 @@ def serialize_order(order):
         "paymentMethod": order.payment_method,
         "paymentStatus": order.payment_status,
         "orderStatus": order.order_status,
-        "createdAt": order.created_at.isoformat(),
+        "createdAt": utc(order.created_at).isoformat(),
         "mpesaReceiptNumber": order.mpesa_receipt_number,
+        "receiptUrl": (
+            f"/api/receipts/{order.receipt.receipt_token}"
+            if order.receipt else None
+        ),
     }
 
 
@@ -42,31 +55,49 @@ def serialize_order(order):
 def create_order():
     data = request.get_json(silent=True) or {}
 
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     customer_name = data.get("customerName")
     phone = data.get("phone")
     table_number = data.get("tableNumber")
     payment_method = data.get("paymentMethod")
     items = data.get("items")
 
-    if not isinstance(customer_name, str) or not customer_name.strip():
+    if not isinstance(customer_name, str) or not customer_name.strip() or len(customer_name.strip()) > 120:
         return jsonify({"error": "Customer name is required"}), 400
 
     if not isinstance(phone, str) or not phone.strip():
         return jsonify({"error": "Customer phone number is required"}), 400
 
-    if (
-        isinstance(table_number, bool)
-        or not isinstance(table_number, int)
-        or table_number < 1
-    ):
-        return jsonify({"error": "A valid table number is required"}), 400
+    try:
+        phone = normalize_phone(phone)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    if payment_method not in ALLOWED_PAYMENT_METHODS:
+    if not isinstance(table_number, str):
+        return jsonify({
+            "error": "Table number must be a value such as A1 or B2"
+        }), 400
+
+    table_number = table_number.strip().upper()
+
+    if not re.fullmatch(r"[A-Z][1-9][0-9]?", table_number):
+        return jsonify({
+            "error": "Invalid table number. Use formats such as A1 or B2"
+        }), 400
+
+    if not isinstance(payment_method, str) or payment_method not in ALLOWED_PAYMENT_METHODS:
         return jsonify({"error": "Choose a valid payment method"}), 400
 
     if not isinstance(items, list) or not items:
         return jsonify({"error": "Your order must contain at least one item"}), 400
 
+    combined = {}
+    for line in items:
+        if not isinstance(line, dict) or type(line.get("id")) is not int or type(line.get("quantity")) is not int or line["quantity"] < 1:
+            return jsonify({"error": "Each item needs an integer ID and positive integer quantity"}), 400
+        combined[line["id"]] = combined.get(line["id"], 0) + line["quantity"]
+    items = [{"id": key, "quantity": value} for key, value in sorted(combined.items())]
     # Validate all items and calculate the total using database prices.
     order_lines = []
     total = Decimal("0.00")
@@ -90,7 +121,7 @@ def create_order():
                 "error": "Each quantity must be a positive integer"
             }), 400
 
-        menu_item = db.session.get(MenuItem, item_id)
+        menu_item = MenuItem.query.filter_by(id=item_id).with_for_update().first()
 
         if menu_item is None:
             return jsonify({
@@ -104,6 +135,11 @@ def create_order():
                     f"{menu_item.name} is currently unavailable. "
                     "Please remove it from your order."
                 )
+            }), 400
+
+        if menu_item.stock_quantity is not None and menu_item.stock_quantity < quantity:
+            return jsonify({
+                "error": f"Not enough stock for {menu_item.name}. Only {menu_item.stock_quantity} available."
             }), 400
 
         try:
@@ -120,7 +156,11 @@ def create_order():
             "item_name": menu_item.name,
             "quantity": quantity,
             "unit_price": unit_price,
+            "preparation_time": menu_item.preparation_time,
+            "serving_time": menu_item.serving_time,
         })
+
+    payment_status = "Pending"
 
     order = Order(
         customer_name=customer_name.strip(),
@@ -128,7 +168,7 @@ def create_order():
         table_number=table_number,
         total=total,
         payment_method=payment_method,
-        payment_status="Pending",
+        payment_status=payment_status,
         order_status="Pending",
     )
 
@@ -144,22 +184,36 @@ def create_order():
                     item_name=line["item_name"],
                     quantity=line["quantity"],
                     unit_price=line["unit_price"],
+                    preparation_time=line["preparation_time"],
+                    serving_time=line["serving_time"],
                 )
             )
+            # Decrement inventory stock
+            menu_rec = db.session.get(MenuItem, line["menu_item_id"])
+            if menu_rec and menu_rec.stock_quantity is not None:
+                menu_rec.stock_quantity = max(0, menu_rec.stock_quantity - line["quantity"])
+                if menu_rec.stock_quantity == 0:
+                    menu_rec.availability = False
 
+        response = jsonify({})
+        order.customer_id = ensure_customer(response)
+        if payment_method == "Cash":
+            confirm_receipt(order)
         db.session.commit()
+        if order.receipt:
+            from ..services.notifications import deliver_receipt
+            deliver_receipt(order.receipt)
 
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Could not create the order"}), 500
 
-    return jsonify({
-        "message": "Order created successfully",
-        "order": serialize_order(order),
-    }), 201
+    response.set_data(current_app.json.dumps({"message": "Order created successfully", "order": serialize_order(order)}))
+    return response, 201
 
 
 @orders_bp.route("", methods=["GET"])
+@staff_required("manager", "waiter")
 def get_orders():
     orders = Order.query.order_by(
         Order.created_at.desc(),
@@ -176,4 +230,6 @@ def get_order(order_id):
     if order is None:
         return jsonify({"error": "Order not found"}), 404
 
+    if not owns_order(order):
+        return jsonify({"error": "Order not found"}), 404
     return jsonify({"order": serialize_order(order)}), 200

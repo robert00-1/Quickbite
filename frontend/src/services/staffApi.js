@@ -1,8 +1,10 @@
 
-const DEFAULT_API_URL = "http://127.0.0.1:5000/api";
+const DEFAULT_API_URL = "/api";
 
 const CONFIGURED_API_URL = (
-  import.meta.env.VITE_API_BASE_URL || DEFAULT_API_URL
+  import.meta.env.VITE_API_BASE_URL
+    ? import.meta.env.VITE_API_BASE_URL.replace(/\/menu-items$/, "")
+    : DEFAULT_API_URL
 ).replace(/\/+$/, "");
 
 // Supports:
@@ -72,6 +74,10 @@ export function saveStaffSession(data) {
     USER_KEY,
     JSON.stringify(data.user)
   );
+
+  if (data.csrf_token) {
+    localStorage.setItem(CSRF_COOKIE_NAME, data.csrf_token);
+  }
 }
 
 /**
@@ -85,6 +91,7 @@ export function clearStaffSession() {
 
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(CSRF_COOKIE_NAME);
 }
 
 /**
@@ -150,7 +157,11 @@ export async function staffRequest(endpoint, options = {}) {
 
   // Attach CSRF token to requests that modify server data.
   if (METHODS_REQUIRING_CSRF.has(method)) {
-    const csrfToken = getCookie(CSRF_COOKIE_NAME);
+    const csrfToken =
+      getCookie(CSRF_COOKIE_NAME) ||
+      (typeof localStorage !== "undefined"
+        ? localStorage.getItem(CSRF_COOKIE_NAME)
+        : "");
 
     if (csrfToken) {
       headers.set("X-CSRF-Token", csrfToken);
@@ -174,7 +185,7 @@ export async function staffRequest(endpoint, options = {}) {
 
   const responseText = await response.text();
 
-  let data = {};
+  let data;
 
   try {
     data = responseText

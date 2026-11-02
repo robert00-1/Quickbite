@@ -62,6 +62,9 @@ def serialize_item(item):
         "availability": bool(item.availability),
         "stock_quantity": item.stock_quantity,
         "is_food_of_day": bool(item.is_food_of_day),
+        "is_meal_of_day": bool(item.is_food_of_day),
+        "preparation_time": item.preparation_time if hasattr(item, "preparation_time") else 15,
+        "serving_time": item.serving_time if hasattr(item, "serving_time") else 5,
     }
 
 
@@ -80,9 +83,46 @@ def validate_availability(data):
 @menu_items_bp.route("", methods=["GET"])
 @menu_items_bp.route("/", methods=["GET"])
 def get_menu_items():
-    """Return all menu items."""
-    items = MenuItem.query.order_by(MenuItem.id.asc()).all()
+    """Return menu items, optionally filtered by search, category, price, or meal-of-day."""
+    from sqlalchemy import func
 
+    query = MenuItem.query
+
+    search = request.args.get("search", "").strip()
+    if search:
+        term = search.lower()
+        query = query.filter(
+            MenuItem.name.ilike("%" + term + "%")
+            | MenuItem.description.ilike("%" + term + "%")
+        )
+
+    category = request.args.get("category", "").strip()
+    if category:
+        query = query.filter(MenuItem.category == category)
+
+    min_price = request.args.get("min_price")
+    if min_price is not None:
+        try:
+            value = float(min_price)
+            if not math.isfinite(value) or value < 0: raise ValueError()
+            query = query.filter(MenuItem.price >= value)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Price filters must be valid numbers"}), 400
+
+    max_price = request.args.get("max_price")
+    if max_price is not None:
+        try:
+            value = float(max_price)
+            if not math.isfinite(value) or value < 0: raise ValueError()
+            query = query.filter(MenuItem.price <= value)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Price filters must be valid numbers"}), 400
+
+    is_meal_of_day = request.args.get("is_meal_of_day", "").strip().lower()
+    if is_meal_of_day == "true":
+        query = query.filter(MenuItem.is_food_of_day.is_(True))
+
+    items = query.order_by(MenuItem.id.asc()).all()
     return jsonify([serialize_item(item) for item in items]), 200
 
 
@@ -147,6 +187,12 @@ def create_menu_item():
             {"error": "Stock quantity must be a non-negative integer"}
         ), 400
 
+    preparation_time = data.get("preparation_time", 15)
+    serving_time = data.get("serving_time", 5)
+
+    if any(type(t) is not int or not 0 <= t <= 1440 for t in [preparation_time, serving_time]):
+        return jsonify({"error": "Times must be whole minutes between 0 and 1440"}), 400
+
     item = MenuItem(
         name=name.strip(),
         description=description.strip(),
@@ -156,6 +202,8 @@ def create_menu_item():
         ingredients=ingredients,
         availability=availability,
         stock_quantity=stock_quantity,
+        preparation_time=preparation_time if isinstance(preparation_time, int) and preparation_time >= 0 else 15,
+        serving_time=serving_time if isinstance(serving_time, int) and serving_time >= 0 else 5,
     )
 
     try:
@@ -312,6 +360,17 @@ def update_menu_item(item_id):
 
             setattr(item, field, value.strip())
 
+    for time_field in ("preparation_time", "serving_time"):
+        if time_field in data:
+            t_val = data[time_field]
+            if type(t_val) is not int or not 0 <= t_val <= 1440:
+                return jsonify({"error": "Times must be whole minutes between 0 and 1440"}), 400
+            setattr(item, time_field, t_val)
+
+    if "is_food_of_day" in data:
+        if type(data["is_food_of_day"]) is not bool:
+            return jsonify({"error": "Meal of the Day must be true or false"}), 400
+        item.is_food_of_day = data["is_food_of_day"]
     if "availability" in data:
         item.availability = data["availability"]
 

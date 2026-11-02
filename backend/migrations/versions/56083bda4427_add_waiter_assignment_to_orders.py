@@ -22,7 +22,7 @@ def upgrade():
         batch_op.add_column(sa.Column('assigned_waiter_id', sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column('served_by_name', sa.String(length=120), nullable=True))
         batch_op.create_index(batch_op.f('ix_orders_assigned_waiter_id'), ['assigned_waiter_id'], unique=False)
-        batch_op.create_foreign_key(None, 'waiter_profiles', ['assigned_waiter_id'], ['id'], ondelete='SET NULL')
+        batch_op.create_foreign_key('fk_orders_assigned_waiter_id', 'waiter_profiles', ['assigned_waiter_id'], ['id'], ondelete='SET NULL')
 
     # ### end Alembic commands ###
 
@@ -33,7 +33,7 @@ def downgrade():
         # WARNING: constraint name is None; this directive will fail as
         # rendered.  Add a name, or use a naming convention; see
         # https://alembic.sqlalchemy.org/en/latest/naming.html
-        batch_op.drop_constraint(None, type_='foreignkey')
+        batch_op.drop_constraint('fk_orders_assigned_waiter_id', type_='foreignkey')
         batch_op.drop_index(batch_op.f('ix_orders_assigned_waiter_id'))
         batch_op.drop_column('served_by_name')
         batch_op.drop_column('assigned_waiter_id')

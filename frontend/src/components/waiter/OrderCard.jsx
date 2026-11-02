@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from "react";
+import { API_ROOT, staffRequest } from "../../services/staffApi";
 import { ORDER_STATUSES } from "../../utils/orderHelpers";
 
 const NEXT_ACTION = {
@@ -60,6 +61,8 @@ function OrderCard({
   onStatusChange,
   onPrintReceipt,
 }) {
+  const [paymentError, setPaymentError] = useState("");
+  const [confirmedPayment, setConfirmedPayment] = useState(false);
   const [waiterChoice, setWaiterChoice] = useState(
     order.assignedWaiterId != null
       ? String(order.assignedWaiterId)
@@ -125,6 +128,10 @@ function OrderCard({
         {order.paymentMethod} ({order.paymentStatus})
       </p>
 
+      <p className="text-sm text-gray-500">Preparation: {order.preparationMinutes} min · Serving: {order.servingMinutes} min</p>
+      {order.receiptUrl && <a href={`${API_ROOT.replace(/\/api$/, "")}${order.receiptUrl}`} target="_blank" rel="noreferrer" className="text-red-500">View digital receipt</a>}
+      {order.paymentMethod !== "M-Pesa" && order.paymentStatus !== "Paid" && !confirmedPayment && <button type="button" className="mt-2 rounded border px-3 py-2" onClick={async () => {try {await staffRequest(`/payments/orders/${order.id}/confirm`, {method: "POST"});setConfirmedPayment(true);setPaymentError("");} catch(err) {setPaymentError(err.message);}}}>Confirm payment received</button>}
+      {confirmedPayment && <p>Payment confirmed</p>}{paymentError && <p role="alert">{paymentError}</p>}
       <div className="mt-4 rounded-lg bg-gray-50 p-3">
         <p className="text-sm font-semibold text-gray-700">
           {isServed ? "Served by" : "Assigned waiter"}

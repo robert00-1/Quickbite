@@ -13,7 +13,6 @@ function CustomerDetails() {
   });
 
   const handleContinue = () => {
-    console.log("Customer details:", customer);
     saveCustomer(customer);
     navigate("/checkout");
   };

@@ -1,24 +1,21 @@
 
 import { useState } from "react";
+import { useCart } from "../context/CartContext";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import DemoPayment from "../components/checkout/DemoPayment";
-import { useCart } from "../context/CartContext";
 import {
   getCustomer,
   getCart,
   getCartTotal,
-  placeOrder,
 } from "../utils/orderHelpers";
 
-const API_ROOT = import.meta.env.VITE_API_BASE_URL
-  ? import.meta.env.VITE_API_BASE_URL.replace(/\/menu-items\/?$/, "")
-  : import.meta.env.VITE_API_ROOT || "http://127.0.0.1:5000/api";
+import { API_ROOT } from "../services/staffApi";
 
 function Payment() {
   const navigate = useNavigate();
+  const { clearCart } = useCart();
   const location = useLocation();
   const method = location.state?.method;
-  const { clearCart } = useCart();
 
   const [customer] = useState(() => getCustomer());
   const [cart] = useState(() => getCart());
@@ -26,6 +23,7 @@ function Payment() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pendingOrderId, setPendingOrderId] = useState(null);
+  const [createdOrder, setCreatedOrder] = useState(null);
 
   if (!method || !customer || cart.length === 0) {
     return (
@@ -59,9 +57,8 @@ function Payment() {
       "quickbite_orders",
       JSON.stringify(updatedOrders)
     );
-    clearCart();
 
-    localStorage.removeItem("quickbite_cart");
+    clearCart();
     localStorage.removeItem("quickbite_customer");
 
     navigate("/order-confirmation");
@@ -69,7 +66,7 @@ function Payment() {
 
   // Check the actual order status returned by Flask.
   const checkPaymentStatus = async (orderId) => {
-    const response = await fetch(`${API_ROOT}/orders/${orderId}`);
+    const response = await fetch(`${API_ROOT}/orders/${orderId}`, { credentials: "include" });
     const data = await response.json();
 
     if (!response.ok) {
@@ -83,7 +80,7 @@ function Payment() {
       return "paid";
     }
 
-    if (order.paymentStatus === "Failed") {
+    if (["Failed", "Cancelled"].includes(order.paymentStatus)) {
       setError(
         "M-Pesa payment failed. Please check your phone and try again."
       );
@@ -105,14 +102,17 @@ function Payment() {
     setMessage("Creating your order...");
 
     try {
-      // 1. Create the order in the Flask database.
+      // Reuse the reserved order if STK initiation needs a retry.
+      let order = createdOrder;
+      if (!order) {
       const orderResponse = await fetch(`${API_ROOT}/orders`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerName: customer.fullName,
           phone: customer.phone,
-          tableNumber: Number(customer.tableNumber),
+          tableNumber: String(customer.tableNumber).trim().toUpperCase(),
           paymentMethod: "M-Pesa",
           items: cart.map((item) => ({
             id: Number(item.id),
@@ -127,7 +127,9 @@ function Payment() {
         throw new Error(orderData.error || "Could not create your order.");
       }
 
-      const order = orderData.order;
+      order = orderData.order;
+      setCreatedOrder(order);
+      }
       setMessage("Sending M-Pesa payment request...");
 
       // 2. Ask the backend to initiate the Daraja STK Push.
@@ -135,6 +137,7 @@ function Payment() {
         `${API_ROOT}/payments/stk-push`,
         {
           method: "POST",
+        credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ order_id: order.id }),
         }
@@ -176,11 +179,50 @@ function Payment() {
     }
   };
 
+  const handleDirectPayment = async () => {
+    setProcessing(true);
+    setError("");
+
+    try {
+      const orderResponse = await fetch(`${API_ROOT}/orders`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerName: customer.fullName,
+          phone: customer.phone,
+          tableNumber: String(customer.tableNumber).trim().toUpperCase(),
+          paymentMethod: method,
+
+          items: cart.map((item) => ({
+            id: Number(item.id),
+            quantity: Number(item.quantity),
+          })),
+        }),
+      });
+
+      const orderData = await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(orderData.error || "Could not create your order.");
+      }
+
+      finishPaidOrder(orderData.order);
+    } catch (err) {
+      setError(err.message || "Unable to place your order. Please try again.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleContinue = () => {
     if (method === "M-Pesa") {
       handleMpesaPayment();
       return;
     }
+
+    handleDirectPayment();
+  };
 
     // Preserve the existing Cash/Card demo flow.
     placeOrder({ customer, cart, paymentMethod: method });
@@ -222,8 +264,7 @@ function Payment() {
 
           {method === "M-Pesa" && (
             <p className="mt-3 text-sm text-gray-500">
-              For this presentation, the backend is configured to request
-              a KSh 1 sandbox payment.
+              Approve the payment request on your phone. Your order remains pending until payment is verified.
             </p>
           )}
         </div>

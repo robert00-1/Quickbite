@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getMealById } from "../services/api";
+import { getMealById, FALLBACK_IMAGE } from "../services/api";
 import Loading from "../components/menu/Loading";
 import ErrorMessage from "../components/menu/ErrorMessage";
 import { useCart } from "../context/CartContext";
@@ -75,15 +75,15 @@ function FoodDetails() {
       <div className="rounded-[10px] bg-white p-6 shadow-sm md:p-8">
         {/* Top Section */}
         <div className="mb-6 flex justify-between gap-4">
-          <span
+          {!isAvailable && <span
             className={`h-fit rounded-full px-4 py-2 text-sm font-bold ${
               isAvailable
                 ? "bg-green-100 text-green-700"
                 : "bg-red-100 text-red-700"
             }`}
           >
-            {isAvailable ? "Available" : "Unavailable"}
-          </span>
+            Unavailable
+          </span>}
 
           <Link
             to="/menu"
@@ -96,6 +96,7 @@ function FoodDetails() {
         {/* Meal Image */}
         <img
           src={meal.image}
+          onError={(event) => {event.currentTarget.onerror = null;event.currentTarget.src = FALLBACK_IMAGE;}}
           alt={meal.name}
           className={`w-full max-w-[500px] rounded-[10px] object-cover ${
             !isAvailable ? "grayscale" : ""
@@ -117,6 +118,7 @@ function FoodDetails() {
             KSh {meal.price}
           </p>
 
+          <p className="mb-4 text-sm text-gray-500">Preparation: {meal.preparation_time} min · Serving: {meal.serving_time} min</p>
           <h2 className="mb-3 text-xl font-bold text-gray-800">
             About this meal
           </h2>
