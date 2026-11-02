@@ -224,13 +224,6 @@ function Payment() {
     handleDirectPayment();
   };
 
-    // Preserve the existing Cash/Card demo flow.
-    placeOrder({ customer, cart, paymentMethod: method });
-
-    clearCart();
-    navigate("/order-confirmation");
-  };
-
   const handleManualStatusCheck = async () => {
     if (!pendingOrderId) return;
 
