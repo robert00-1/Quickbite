@@ -1,3 +1,4 @@
+import { imageUrl } from "./api";
 
 import { staffRequest } from "./staffApi";
 
@@ -169,7 +170,7 @@ export async function getMenuItems() {
     );
   }
 
-  return data;
+  return data.map((item) => ({...item, image: imageUrl(item.image)}));
 }
 
 /**
@@ -315,6 +316,9 @@ export async function setFoodOfTheDay(mealId) {
     throw new Error("Please select a meal.");
   }
 
+  if (String(mealId).startsWith("mealdb_")) {
+    return staffRequest(`/menu-items/${mealId}`, {method: "PATCH", body: JSON.stringify({is_food_of_day: true})});
+  }
   return staffRequest("/manager/food-of-the-day", {
     method: "PUT",
     body: JSON.stringify({ meal_id: Number(mealId) }),

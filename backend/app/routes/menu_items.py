@@ -1,5 +1,6 @@
 
 import math
+from sqlalchemy.exc import IntegrityError
 import os
 
 import cloudinary
@@ -10,7 +11,9 @@ from werkzeug.utils import secure_filename
 
 from ..extensions import db
 from ..models.menu_item import MenuItem
+from ..services.menu_images import menu_image, photo_catalog, PHOTO_DIR
 from ..utils.auth import staff_required
+from ..utils.pagination import menu_response
 
 
 menu_items_bp = Blueprint(
@@ -56,7 +59,7 @@ def serialize_item(item):
         "name": item.name,
         "description": item.description,
         "price": float(item.price) if item.price is not None else 0,
-        "image": item.image,
+        "image": menu_image(item),
         "category": item.category,
         "ingredients": item.ingredients or [],
         "availability": bool(item.availability),
@@ -84,7 +87,8 @@ def validate_availability(data):
 @menu_items_bp.route("/", methods=["GET"])
 def get_menu_items():
     """Return menu items, optionally filtered by search, category, price, or meal-of-day."""
-    from sqlalchemy import func
+    if current_app.config.get("MEALDB_ENABLED"):
+        return get_complete_mealdb_menu()
 
     query = MenuItem.query
 
@@ -123,7 +127,7 @@ def get_menu_items():
         query = query.filter(MenuItem.is_food_of_day.is_(True))
 
     items = query.order_by(MenuItem.id.asc()).all()
-    return jsonify([serialize_item(item) for item in items]), 200
+    return menu_response([serialize_item(item) for item in items])
 
 
 @menu_items_bp.route("", methods=["POST"])
@@ -277,19 +281,47 @@ def upload_menu_item_image():
         ), 502
 
 
-@menu_items_bp.route("/<int:item_id>", methods=["GET"])
+def editable_menu_item(item_id):
+    """Resolve a manager-selected virtual recipe without duplicating route logic."""
+    if item_id.startswith('mealdb_') and item_id[7:].isdigit():
+        from sqlalchemy import inspect
+        from ..services.mealdb import resolve_order_item, MealDBUnavailable
+        if not inspect(db.engine).has_table('mealdb_menu_links'):
+            return None, (jsonify({"error": "The restaurant database must be updated before managing new MealDB meals.", "code": "database_migration_required"}), 503)
+        try:
+            item = resolve_order_item(item_id[7:])
+        except IntegrityError:
+            db.session.rollback()
+            return None, (jsonify({"error": "This recipe was updated by another request. Please retry."}), 409)
+        except MealDBUnavailable as exc:
+            return None, (jsonify({"error": str(exc)}), 502)
+        if item is None:
+            return None, (jsonify({"error": "Meal not found"}), 404)
+        return item, None
+    if item_id.isdigit():
+        return db.get_or_404(MenuItem, int(item_id)), None
+    return None, (jsonify({"error": "Menu item not found"}), 404)
+
+
+@menu_items_bp.route("/<string:item_id>", methods=["GET"])
 def get_menu_item(item_id):
     """Return one menu item."""
-    item = db.get_or_404(MenuItem, item_id)
+    if item_id.startswith('mealdb_') and item_id[7:].isdigit():
+        return get_mealdb_details(int(item_id[7:]))
+    item, error = editable_menu_item(item_id)
+    if error:
+        return error
 
     return jsonify(serialize_item(item)), 200
 
 
-@menu_items_bp.route("/<int:item_id>", methods=["PATCH"])
+@menu_items_bp.route("/<string:item_id>", methods=["PATCH"])
 @staff_required("manager")
 def update_menu_item(item_id):
     """Update a menu item. Only managers may update menu items."""
-    item = db.get_or_404(MenuItem, item_id)
+    item, error = editable_menu_item(item_id)
+    if error:
+        return error
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -384,14 +416,22 @@ def update_menu_item(item_id):
     return jsonify(serialize_item(item)), 200
 
 
-@menu_items_bp.route("/<int:item_id>", methods=["DELETE"])
+@menu_items_bp.route("/<string:item_id>", methods=["DELETE"])
 @staff_required("manager")
 def delete_menu_item(item_id):
     """Delete a menu item. Only managers may delete menu items."""
-    item = db.get_or_404(MenuItem, item_id)
+    item, error = editable_menu_item(item_id)
+    if error:
+        return error
 
     try:
-        db.session.delete(item)
+        from ..models.mealdb_link import MealDBLink
+        from sqlalchemy import inspect
+        linked = inspect(db.engine).has_table('mealdb_menu_links') and MealDBLink.query.filter_by(menu_item_id=item.id).first()
+        if linked:
+            item.availability = False
+        else:
+            db.session.delete(item)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -399,3 +439,63 @@ def delete_menu_item(item_id):
         return jsonify({"error": "Could not delete menu item"}), 500
 
     return jsonify({"message": "Menu item deleted successfully"}), 200
+
+
+@menu_items_bp.get('/photos/<string:filename>')
+def bundled_food_photo(filename):
+    from flask import send_from_directory, abort
+    if filename not in {photo['filename'] for photo in photo_catalog()}:
+        abort(404)
+    return send_from_directory(PHOTO_DIR, filename, max_age=86400)
+
+
+@menu_items_bp.get('/photo-credits')
+def food_photo_credits():
+    from flask import render_template_string
+    return render_template_string('<!doctype html><html lang="en"><meta name="viewport" content="width=device-width, initial-scale=1"><title>QuickBite photo credits</title><body><h1>Food photo credits</h1><p>Representative photographs of these dishes; restaurant presentation may vary.</p>{% for photo in photos %}<p><a href="{{ photo.source }}">{{ photo.menu_name }}</a> by {{ photo.author }} · <a href="{{ photo.license_url }}">{{ photo.license }}</a>. {{ photo.changes }}</p>{% endfor %}</body></html>', photos=photo_catalog())
+
+
+
+def get_complete_mealdb_menu():
+    from ..services.mealdb import merged_menu, MealDBUnavailable
+    try:
+        items, warning = merged_menu()
+    except MealDBUnavailable as exc:
+        return jsonify({"error": str(exc), "code": "mealdb_unavailable"}), 502
+    search = request.args.get("search", "").strip().casefold()
+    category = request.args.get("category", "").strip()
+    try:
+        prices = {name: float(request.args[name]) for name in ("min_price", "max_price") if name in request.args}
+        if any(not math.isfinite(price) or price < 0 for price in prices.values()):
+            raise ValueError()
+    except ValueError:
+        return jsonify({"error": "Price filters must be valid numbers"}), 400
+    items = [item for item in items
+        if (not search or search in (item['name'] + ' ' + (item.get('description') or '')).casefold())
+        and (not category or item['category'] == category)
+        and item['price'] >= prices.get('min_price', 0)
+        and item['price'] <= prices.get('max_price', float('inf'))
+        and (request.args.get('is_meal_of_day', '').lower() != 'true' or item['is_food_of_day'])]
+    return menu_response(items, warning)
+
+
+@menu_items_bp.get('/mealdb/<int:meal_id>')
+def get_mealdb_details(meal_id):
+    from ..services.mealdb import lookup, normalize, MealDBUnavailable
+    try:
+        meal = lookup(meal_id)
+    except MealDBUnavailable as exc:
+        return jsonify({"error": str(exc)}), 502
+    if meal is None:
+        return jsonify({"error": "Meal not found"}), 404
+    # Existing name matches use managed restaurant IDs, prices and availability.
+    from sqlalchemy import inspect
+    from ..models.mealdb_link import MealDBLink
+    link = db.session.get(MealDBLink, str(meal_id)) if inspect(db.engine).has_table('mealdb_menu_links') else None
+    saved = link.menu_item if link else MenuItem.query.filter_by(name=meal['strMeal']).first()
+    if saved:
+        data = serialize_item(saved)
+        if not saved.image:
+            data['image'] = meal.get('strMealThumb')
+        return jsonify(data)
+    return jsonify(normalize(meal))

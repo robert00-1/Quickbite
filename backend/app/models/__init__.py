@@ -8,3 +8,7 @@ from .weekly_shift import WeeklyShift
 from .receipt import Receipt
 from .complaint import Complaint
 from .payment import Payment
+
+from .notification import OrderNotification
+
+from .mealdb_link import MealDBLink

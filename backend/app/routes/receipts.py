@@ -99,9 +99,11 @@ def whatsapp_delivery_webhook():
     import hmac
     from flask import request, current_app
     from ..extensions import db
+    from ..models.notification import OrderNotification
     secret = current_app.config.get('WHATSAPP_APP_SECRET')
     signature = request.headers.get('X-Hub-Signature-256', '')
-    if not secret or not hmac.compare_digest(signature, 'sha256=' + hmac.new(secret.encode(), request.get_data(), hashlib.sha256).hexdigest()):
+    import re
+    if not secret or not re.fullmatch(r'sha256=[0-9a-f]{64}', signature) or not hmac.compare_digest(signature, 'sha256=' + hmac.new(secret.encode(), request.get_data(), hashlib.sha256).hexdigest()):
         return {'error': 'Invalid webhook signature'}, 403
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -111,11 +113,18 @@ def whatsapp_delivery_webhook():
             for change in entry.get('changes', []):
                 for status in change.get('value', {}).get('statuses', []):
                     receipt = Receipt.query.filter_by(notification_provider_id=status.get('id')).first() if status.get('id') else None
+                    notification = OrderNotification.query.filter_by(provider_id=status.get('id')).first() if status.get('id') else None
                     new = status.get('status')
                     # Do not let delayed delivery events undo later read/delivered states.
                     ranks = {'accepted': 0, 'sent': 1, 'failed': 1, 'delivered': 2, 'read': 3}
                     if receipt and new in ranks and ranks[new] >= ranks.get(receipt.notification_status, 0):
                         receipt.notification_status = new
+                        if new == 'failed':
+                            receipt.notification_error = 'Provider reported delivery failure.'
+                    if notification and new in ranks and ranks[new] >= ranks.get(notification.status, 0):
+                        notification.status = new
+                        if new == 'failed':
+                            notification.error_code = 'provider_delivery_failed'
         db.session.commit()
     except (AttributeError, TypeError):
         db.session.rollback()

@@ -19,7 +19,7 @@ MIGRATIONS = str(Path(__file__).parent / 'migrations')
 BASELINE = 'a1b2c3d4e5f6'
 
 
-def adopt(database_url, apply=False):
+def adopt(database_url, apply=False, backup_only=False):
     url=make_url(database_url)
     if url.get_backend_name() != 'sqlite' or not url.database or url.database == ':memory:':
         raise RuntimeError('Legacy adoption supports existing SQLite files only; versioned PostgreSQL uses flask db upgrade.')
@@ -54,15 +54,24 @@ def adopt(database_url, apply=False):
                         raise RuntimeError(f'Column type/nullability mismatch in {table}.{name}. No changes made.')
             db.engine.dispose()
     print('Supported legacy baseline verified. Existing rows will be retained.')
-    if not apply:
+    if not apply and not backup_only:
         print('Run again with --apply to back up and migrate this database.')
         return
     backup_dir=source.parent/'backups'
     backup_dir.mkdir(exist_ok=True)
-    backup=backup_dir/(source.name+'.backup-'+datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S'))
-    with sqlite3.connect(source) as src, sqlite3.connect(backup) as target:
+    backup=backup_dir/(source.name+'.backup-'+datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f'))
+    with backup.open('xb'):
+        pass
+    backup.chmod(0o600)
+    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as src, sqlite3.connect(backup) as target:
         src.backup(target)
+        if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise RuntimeError('Backup integrity check failed. No migration was applied.')
+    print('Verified SQLite backup:', backup)
     print('SQLite backup created in the backups directory beside the source database.')
+    if backup_only:
+        print("Backup verified. No migration or database changes were applied.")
+        return
     with app.app_context():
         stamp(directory=MIGRATIONS, revision=BASELINE)
         upgrade(directory=MIGRATIONS)
@@ -73,6 +82,8 @@ def adopt(database_url, apply=False):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database-url', default=Config.SQLALCHEMY_DATABASE_URI)
-    parser.add_argument('--apply',action='store_true')
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--apply',action='store_true')
+    mode.add_argument('--backup-only',action='store_true')
     args=parser.parse_args()
-    adopt(args.database_url,args.apply)
+    adopt(args.database_url,args.apply,args.backup_only)

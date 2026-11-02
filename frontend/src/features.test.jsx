@@ -153,3 +153,96 @@ describe("Checkout integrity", () => {
     expect(JSON.parse(localStorage.getItem("quickbite_cart"))).toEqual([]);
   });
 });
+
+describe("Checkout retries and photographs", () => {
+  it("blocks duplicate clicks and sends one stable retry key", async () => {
+    localStorage.setItem("quickbite_cart",JSON.stringify([{id:1,name:"Burger",quantity:1,price:500}]));
+    localStorage.setItem("quickbite_customer",JSON.stringify({fullName:"Alice",phone:"0712345678",tableNumber:"A1"}));
+    let finish;
+    fetch.mockImplementation(async (url) => url.endsWith('/session') ? jsonResponse({}) : new Promise((resolve) => {finish=resolve;}));
+    render(<MemoryRouter initialEntries={[{pathname:"/payment",state:{method:"Card"}}]}><CartProvider><Payment /></CartProvider></MemoryRouter>);
+    const button=screen.getByRole('button',{name:'Confirm order'});
+    fireEvent.click(button);fireEvent.click(button);
+    await waitFor(()=>expect(fetch.mock.calls.filter(([url])=>url.endsWith('/orders'))).toHaveLength(1));
+    const options=fetch.mock.calls.find(([url])=>url.endsWith('/orders'))[1];
+    expect(options.headers['Idempotency-Key']).toMatch(/^[a-z0-9-]{36}$/);
+    finish({ok:false,json:async()=>({error:'Temporary database error'})});
+    await screen.findByText('Temporary database error');
+    fireEvent.click(screen.getByRole('button',{name:'Confirm order'}));
+    await waitFor(()=>expect(fetch.mock.calls.filter(([url])=>url.endsWith('/orders'))).toHaveLength(2));
+    expect(fetch.mock.calls.filter(([url])=>url.endsWith('/orders'))[1][1].headers['Idempotency-Key']).toBe(options.headers['Idempotency-Key']);
+    finish(jsonResponse({order:{id:2,items:[],paymentStatus:'Pending'}}));
+  });
+  it("keeps backend photo routes and rejects invalid/credential URLs", () => {
+    expect(imageUrl('/api/menu-items/photos/beef-pilau.jpg')).toContain('/api/menu-items/photos/beef-pilau.jpg');
+    expect(imageUrl('https://user:password@example.test/photo.jpg')).toBe(FALLBACK_IMAGE);
+    expect(imageUrl(' https://[')).toBe(FALLBACK_IMAGE);
+    expect(imageUrl(' data:text/html,bad')).toBe(FALLBACK_IMAGE);
+  });
+});
+
+import { menuThumbnail } from "./services/api";
+describe("Menu source and complete inventory", () => {
+  it("loads the unfiltered inventory once, without a second request hiding products", async () => {
+    fetch.mockResolvedValueOnce(jsonResponse(meals)).mockRejectedValue(new Error('Second request must not be needed'));
+    mount(<Menu />);
+    expect(await screen.findByText('Juice')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('combobox',{name:'Menu category'}).querySelectorAll('option[value="All"]')).toHaveLength(1);
+  });
+  it("renders all 16 API products, including unavailable and newly added categories", async () => {
+    const inventory=Array.from({length:16},(_,n)=>({id:n+1,name:`Product ${n+1}`,category:n===15?'New category':'Main',price:100+n,availability:n!==14,image:'https://example.test/meal.jpg'}));
+    fetch.mockResolvedValue(jsonResponse(inventory));
+    mount(<Menu />);
+    await screen.findByText('Product 10');
+    expect(screen.queryByText('Product 11')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name:'Previous'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', {name:'Next'}));
+    for(const item of inventory.slice(10)) expect(screen.getByRole('heading',{name:item.name,exact:true})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name:'Next'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', {name:'Page 1'}));
+    expect(screen.getByText('Product 1')).toBeInTheDocument();
+    expect(screen.getByRole('option',{name:'New category'})).toBeInTheDocument();
+  });
+  it("ignores a stale failed filter response after a newer success", async () => {
+    mount(<Menu />);await screen.findByText('Juice');
+    let failOld;
+    fetch.mockImplementation(async(url)=>url.includes('category=Main')?new Promise((_,reject)=>{failOld=reject;}):jsonResponse(meals));
+    fireEvent.change(screen.getByRole('combobox',{name:'Menu category'}),{target:{value:'Main'}});
+    await waitFor(()=>expect(failOld).toBeTypeOf('function'));
+    fireEvent.change(screen.getByRole('combobox',{name:'Menu category'}),{target:{value:'All'}});
+    await waitFor(()=>expect(fetch).toHaveBeenLastCalledWith('/api/menu-items',expect.any(Object)));
+    failOld(new Error('Outdated request failed'));
+    await waitFor(()=>expect(screen.queryByText('Outdated request failed')).not.toBeInTheDocument());
+    expect(screen.getByText('Juice')).toBeInTheDocument();
+  });
+  it("uses smaller Cloudinary deliveries and preserves signed URLs",()=>{
+    expect(menuThumbnail('https://res.cloudinary.com/example/image/upload/v123/food.png')).toBe('https://res.cloudinary.com/example/image/upload/f_auto,q_auto,w_800,c_limit/v123/food.png');
+    const signed='https://res.cloudinary.com/example/image/upload/s--signed--/v123/food.jpg';
+    expect(menuThumbnail(signed)).toBe(signed);
+  });
+});
+
+
+describe("Original MealDB catalogue", () => {
+  it("preserves external meal IDs, images and categories for details/cart", async () => {
+    fetch.mockResolvedValue(jsonResponse([{id:"mealdb_52772",name:"Arrabiata",price:400,category:"Pasta",image:"https://www.themealdb.com/images/media/meals/test.jpg"}]));
+    const meals=await getMeals();
+    expect(meals[0].id).toBe("mealdb_52772");
+    expect(menuThumbnail(meals[0].image)).toBe("https://www.themealdb.com/images/media/meals/test.jpg/preview");
+    mount(<Menu />);
+    expect(await screen.findByRole("heading",{name:"Arrabiata"})).toBeInTheDocument();
+    expect(screen.getByRole("link",{name:"Arrabiata"})).toHaveAttribute("href","/menu/mealdb_52772");
+  });
+});
+
+it("submits a MealDB cart ID unchanged to the order API",async()=>{
+  localStorage.setItem("quickbite_cart",JSON.stringify([{id:"mealdb_52772",name:"Arrabiata",price:400,quantity:1}]));
+  localStorage.setItem("quickbite_customer",JSON.stringify({fullName:"Guest",phone:"0712345678",tableNumber:"A1"}));
+  fetch.mockImplementation(async(url)=>jsonResponse(url.endsWith('/session')?{}:{order:{id:2,items:[],paymentStatus:'Pending'}}));
+  render(<MemoryRouter initialEntries={[{pathname:"/payment",state:{method:"Cash"}}]}><CartProvider><Payment /></CartProvider></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button',{name:'Confirm order'}));
+  await waitFor(()=>expect(fetch.mock.calls.some(([url])=>url.endsWith('/orders'))).toBe(true));
+  const request=fetch.mock.calls.find(([url])=>url.endsWith('/orders'))[1];
+  expect(JSON.parse(request.body).items[0].id).toBe('mealdb_52772');
+});

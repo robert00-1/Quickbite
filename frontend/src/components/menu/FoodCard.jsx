@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-import { FALLBACK_IMAGE } from "../../services/api";
+import { FALLBACK_IMAGE, menuThumbnail } from "../../services/api";
 
 function FoodCard({ food, onCompare, isSelected }) {
   const isAvailable = food.availability !== false;
@@ -19,7 +19,9 @@ function FoodCard({ food, onCompare, isSelected }) {
         <div className="relative">
           <img
             key={food.image}
-            src={food.image || FALLBACK_IMAGE}
+            src={food.image ? menuThumbnail(food.image) : FALLBACK_IMAGE}
+            loading="lazy"
+            decoding="async"
             alt={food.name}
             className={`h-[200px] w-full object-cover ${
               !isAvailable ? "grayscale" : ""

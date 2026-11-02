@@ -1,0 +1,47 @@
+[
+  {
+    "menu_name": "Chicken Burger",
+    "filename": "chicken-burger.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Chicken_Burger_Kerala.jpg",
+    "author": "Dr. Chinchu C.",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "Wikimedia thumbnail where available; resized by source host and cropped only by CSS display."
+  },
+  {
+    "menu_name": "Beef Pilau",
+    "filename": "beef-pilau.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Pilau_Rice_%28Mixed_Spiced_Rice%29_%26_Beef.jpg",
+    "author": "Jordan808",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "Wikimedia thumbnail where available; resized by source host and cropped only by CSS display."
+  },
+  {
+    "menu_name": "Grilled Chicken and Chips",
+    "filename": "grilled-chicken-and-chips.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Grilled_chicken_and_chips.jpg",
+    "author": "TrainSimFan",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "Wikimedia thumbnail where available; resized by source host and cropped only by CSS display."
+  },
+  {
+    "menu_name": "Vegetable Samosas",
+    "filename": "vegetable-samosas.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Vegetarian_Samosa.jpg",
+    "author": "Ralbahitha",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "Wikimedia thumbnail where available; resized by source host and cropped only by CSS display."
+  },
+  {
+    "menu_name": "Fresh Passion Juice",
+    "filename": "passion-juice.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Passionfruit_juice.jpg",
+    "author": "Fumikas Sagisavas",
+    "license": "CC0 1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "changes": "Wikimedia thumbnail where available; resized by source host and cropped only by CSS display."
+  }
+]

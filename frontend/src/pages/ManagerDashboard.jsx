@@ -1,3 +1,6 @@
+import Pagination from "../components/Pagination";
+import MealListFilters from "../components/MealListFilters";
+import useMealPagination from "../hooks/useMealPagination";
 import ManagerOperations from "../components/ManagerOperations";
 
 import {
@@ -127,6 +130,7 @@ function ManagerDashboard() {
   const [dashboardStatsError, setDashboardStatsError] = useState("");
 
   const [stockItems, setStockItems] = useState([]);
+  const availableMeals = useMealPagination(stockItems);
   const [stockLoading, setStockLoading] = useState(true);
   const [stockError, setStockError] = useState("");
   const [savingStockId, setSavingStockId] = useState(null);
@@ -1524,10 +1528,11 @@ const handleRemoveShift = async (shiftId) => {
         {/* MEAL AVAILABILITY */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <SectionTitle
-            title="Meal Availability"
+            title="Meals Available"
             description="Control which meals customers can order."
           />
 
+          <MealListFilters pagination={availableMeals} label="available meals" />
           {stockError && (
             <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
               {stockError}
@@ -1561,7 +1566,7 @@ const handleRemoveShift = async (shiftId) => {
                 </thead>
 
                 <tbody>
-                  {stockItems.map((item) => {
+                  {availableMeals.items.map((item) => {
                     const isAvailable = item.availability === true;
                     const isSaving = savingStockId === item.id;
 
@@ -1655,6 +1660,7 @@ const handleRemoveShift = async (shiftId) => {
               </table>
             </div>
           )}
+          <Pagination {...availableMeals} label="Manager Meals Available" />
         </section>
         <div className="mb-6 rounded-xl border border-red-100 bg-red-50 p-5">
           <h3 className="mb-2 text-lg font-bold text-gray-800">

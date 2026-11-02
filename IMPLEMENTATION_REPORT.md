@@ -1,195 +1,293 @@
-QuickBite implementation and verification — 2 November 2026
+# QuickBite remaining-issues implementation report
 
-The existing application, routes, styling and staff workflows were retained. Existing uncommitted/staged work was preserved; no commit, push, merge, database reset or changes to the working SQLite database were performed. All destructive test operations used isolated databases.
+> Approved local database update: after explicit user approval, the actual `backend/quickbite.db` was backed up, integrity-checked and migrated to `d4e5f6a7b8c9`. Every pre-existing row value, including staff password hashes, was verified unchanged; foreign-key violations: zero. The origin policy is now shared by CORS, checkout and staff login and accepts alternate loopback ports only in development. Current backend tests: 49 passed. The identified local Flask development server was restarted on port 5000; live preflight and guest-session requests succeeded from localhost ports 5173/5174 and 127.0.0.1:5175, while an untrusted origin returned 403. No test orders were inserted into the actual database. Historical statements below saying the database was not migrated describe the earlier task, not the current state.
 
-| Feature | Status | Files Changed | Test Performed |
-|---|---|---|---|
-| Menu images | Rendering fixed; source photos incomplete | `frontend/src/services/api.js`, `FoodCard.jsx`, `FoodDetails.jsx`, local SVG fallback | URL normalization, unsafe-scheme rejection, failed-image fallback; Chromium verified loaded fallback images |
-| All menu items | Fixed | `services/api.js`, `pages/Menu.jsx` | All returned items render; search/price parameters reach backend; empty/error states tested |
-| Dynamic categories | Fixed | `pages/Menu.jsx`, `routes/menu_items.py` | Categories derive from complete API inventory and survive filtering; Kids/daily sections tested |
-| M-Pesa | Configuration required; mocked flow tested | `routes/payments.py`, `services/mpesa.py`, `models/payment.py`, `pages/Payment.jsx`, environment examples | Mocked STK request, actual amount, duplicate pending prevention, independent query verification, paid/failed/cancelled states |
-| WhatsApp receipts | Configuration required; mocked flow tested | `services/notifications.py`, `models/receipt.py`, `routes/receipts.py` | Mocked provider acceptance/failure, duplicate suppression, signed delivery webhook and challenge verification |
-| Staff password visibility | Fixed | `pages/StaffLogin.jsx` | Show/hide tests; real browser login; password hidden by default |
-| Multiple waiters | Fixed | `routes/auth.py`, `routes/waiter_profiles.py`, waiter UI | Creating waiter accounts creates/links profiles; selection returns multiple registered waiters, excluding manager accounts |
-| Meal of the Day | Fixed | `routes/menu_items.py`, `ManagerOperations.jsx`, `pages/Menu.jsx` | Multiple selections, removal, Kids item selection and retained normal-category rendering |
-| Waiter records | Fixed for linked accounts | `services/activity.py`, `routes/waiter.py`, manager/waiter UI | Start/end/idempotent shifts, account ownership, assignments, complete service, measured activity and hours |
-| Late orders and complaints | Fixed | `utils/timing.py`, `routes/complaints.py`, `routes/manager.py`, `OrderStatus.jsx`, `ManagerOperations.jsx` | Backend overdue calculation, owner-only complaints, manager list/update, frontend manager sections |
-| Authentication/security | Fixed for existing guest/staff flows | `routes/auth.py`, `utils/auth.py`, `utils/customer.py`, `config.py`, order/payment routes | JWT HttpOnly cookies, role checks, CSRF, allowed-origin checks, logout revocation, cookie flags and private-order access |
-| Digital receipts | Fixed | `models/receipt.py`, `routes/receipts.py`, receipt/confirmation UI | Unique receipt, unguessable URL, print page, QR payload/PNG, pending-versus-paid state |
-| Table numbers and estimates | Fixed | order/menu routes, timing utility, customer/order/receipt UI | A1/B12 accepted; numeric-only/new invalid tables rejected; snapshot estimates remain unchanged after menu edits |
-| Meal comparison | Fixed | `pages/Menu.jsx` | Two selections, replacement/removal, names/images/category/prices/preparation times |
+> Menu update: the customer menu now uses the original full MealDB catalogue. See [MENU_SETUP.md](MENU_SETUP.md) for the current source, restart instructions and recipe-link migration. The menu-specific update supersedes the earlier five-photo-only catalogue notes below.
 
-Verification results:
+## 1. Issues identified
 
-- Backend SQLite suite: **29 passed, 0 failed**.
-- Backend PostgreSQL 16 suite: **29 passed, 0 failed** in the dedicated `quickbite_test` database.
-- Frontend Vitest suite: **23 passed, 0 failed** across two files.
-- ESLint: passed.
-- Production Vite build: passed. Staff pages are lazy-loaded; the previous oversized initial bundle warning is resolved.
-- SQLite and PostgreSQL: full migration upgrade, `flask db check`, new migration downgrade to `a1b2c3d4e5f6`, and re-upgrade passed.
-- Copy of the existing unversioned SQLite database: adoption/migration and schema check passed. Counts retained: 5 menu items, 2 staff users, 7 orders, 14 order items, 7 receipts and 0 shifts.
-- Live Flask and Vite servers were started separately against `/tmp/quickbite-verification.sqlite`.
-- Chromium: menu/daily/Kids rendering, fallback images, search, password toggle, manager redirect/dashboard, mobile cash checkout, printable receipt/QR image, customer order tracking and waiter redirect/order dashboard passed. No JavaScript page errors or console errors were observed.
-- Mocked external calls are confined to tests. No real Daraja payment or WhatsApp delivery is claimed.
-- Merge-marker scan and whitespace check: passed.
+The payment failure was reproduced for **Cash, Card and M-Pesa** using a SQLite backup under `/tmp`, without writing to the configured database.
 
-Migration changes:
+The configured database is `backend/quickbite.db`, an **unversioned SQLite database**. It has historical orders, items, receipts, menu records, staff accounts and sessions, but lacks the model’s `orders.customer_id` and `orders.served_at` columns and the previously prepared payment/complaint/notification schema. Consequently, inserting any new order failed. The broad exception handler returned only `Could not create the order`.
 
-- New `b2c3d4e5f6a7_secure_orders_and_activity.py`, following the existing receipt/timing migration `a1b2c3d4e5f6`.
-- Adds customer ownership and service completion timestamps, staff/profile links, payment attempts, receipt delivery status, complaints and a unique index preventing concurrent active shifts.
-- Detects duplicate active shifts before schema changes and rejects them with an actionable error instead of deleting records.
-- Links existing profiles only when a staff name identifies exactly one waiter account. Unmatched historical profiles are preserved.
-- Repairs known missing legacy shift/receipt foreign keys during adoption.
-- Existing uncommitted `a1b2c3d4e5f6` migration was corrected for PostgreSQL table-number conversion. Its downgrade retains string table identifiers to preserve A1/B2 values.
-- Historical assignment migration `56083bda4427` now names its foreign key, enabling SQLite upgrades/downgrades.
-- `manage_legacy_db.py` validates the known unversioned SQLite baseline before stamping it; `--apply` takes a SQLite backup under `backend/backups/` before upgrading. The original working database was only inspected, not migrated.
+There were additional issues:
 
-Required setup and run commands, from the project root:
+- Receipt notification delivery ran inside the order route’s success/error block after commit. A notification exception could make a saved order appear to have failed.
+- The payment screen had no durable request key and the Cash/Card button stayed clickable while submitting. A retry after a lost response could create another order.
+- Card-at-restaurant orders did not receive an initial pending-payment receipt.
+- All five current menu records have NULL image values. Manager images also needed the shared URL normalization.
+- WhatsApp supported receipt delivery but not all five order lifecycle events. Its webhook verification token could appear in access logs.
+- The unittest suite could not be collected by pytest because of a test import. Alembic used a deprecated engine accessor.
+
+**The actual database remains unchanged. Its migration is still required before its order flow can work.** The application now reports `503 / database_migration_required` rather than concealing the missing schema or attempting an automatic migration.
+
+## 2. Files changed
+
+| Files | Purpose |
+|---|---|
+| `backend/app/__init__.py`, `utils/schema.py` | Read-only ordering schema check, structured unavailable response, idempotency CORS header; production JWT secret validation |
+| `backend/app/models/order.py`, `models/notification.py`, `models/__init__.py` | Request-key/fingerprint fields and durable unique order-event records |
+| `backend/app/routes/orders.py` | Guest-session bootstrap, retry deduplication, server totals/validation, atomic order writes, pending Cash/Card receipts, optional delivery after commit |
+| `backend/app/routes/payments.py`, `routes/waiter.py` | Payment-confirmed/preparing/ready/completed notification hooks; meaningful missing-Daraja configuration response |
+| `backend/app/services/notifications.py` | One-time event claims, approved template requests, failure isolation, malformed-provider-response handling |
+| `backend/app/routes/receipts.py`, `utils/logging.py` | Signed delivery status updates for events and receipts, malformed-signature rejection, verification-token redaction |
+| `backend/app/routes/menu_items.py`, `services/menu_images.py` | Curated photo resolution, safe photo serving, public attribution page |
+| `backend/app/static/menu/catalog.json`, `README.md`, five JPEG files | Dish-matched bundled photographs and source/license attribution |
+| `backend/migrations/versions/c3d4e5f6a7b8_order_retries_and_notifications.py` | New additive migration, following `b2c3d4e5f6a7` |
+| `backend/manage_legacy_db.py`, `migrations/env.py` | Verified backup-only mode, exclusive timestamped backups, integrity checking, current engine API |
+| `backend/.env.example`, `requirements-dev.txt`, `.github/workflows/backend-ci.yml` | Event template configuration, pytest test dependency and CI checks |
+| `backend/tests/test_api.py`, `test_features.py`, `test_migrations.py` | Regression coverage, isolated provider configuration and pytest collection |
+| `backend/tests/e2e/fixture_server.py`, `browser_smoke.py` | Separate test backend, photographs, mobile Cash/Card and M-Pesa retry checks |
+| `frontend/src/pages/Payment.jsx` | Shared order submission, guest cookies, durable retry key, duplicate-click guard, meaningful errors, safe cart/redirect behavior |
+| `frontend/src/components/checkout/DemoPayment.jsx`, `PaymentMethod.jsx` | Physical restaurant-payment labels, submission disabling, mobile label sizing; no online cash/card simulation |
+| `frontend/src/services/api.js`, `services/managerApi.js` | Robust image normalization, invalid/credential URL rejection and manager image paths |
+| `frontend/src/pages/Menu.jsx` | Photo credit link, retaining the existing menu layout |
+| `frontend/src/features.test.jsx`, `frontend/vite.config.js` | Retry/image tests and optional test-only development proxy target |
+| `IMPLEMENTATION_REPORT.md` | This report replaces the previous report with current findings and results |
+
+The five JPEG files are `chicken-burger.jpg`, `beef-pilau.jpg`, `grilled-chicken-and-chips.jpg`, `vegetable-samosas.jpg` and `passion-juice.jpg` under `backend/app/static/menu/`.
+
+## 3. Order creation
+
+Verified against migrated isolated databases:
+
+- **Cash:** creates a persisted guest order and receipt with `Pending` payment. The screen states that payment is made at the restaurant.
+- **Card at restaurant:** creates a persisted guest order and receipt with `Pending` payment. It does not process an online card charge. Authorized staff can confirm payment received.
+- **M-Pesa:** first creates a Pending order, then requests Daraja STK Push. Existing amount/phone validation, independent success query and duplicate callback protections remain. Missing credentials produce a clear configuration error while retaining the cart and saved order. A retry reuses the existing order.
+- Prices and totals come from the database, not submitted frontend prices. IDs, quantities, availability, stock, customer fields and table numbers are validated.
+- Guest checkout remains account-free. The guest cookie establishes ownership before order submission. A stored request key is scoped to the same owner and exact normalized request; conflicting reuse returns 409.
+- The cart clears only after a successful Cash/Card order or confirmed M-Pesa payment. Failed creation never redirects to confirmation. Notifications cannot undo a committed order.
+
+The running application’s actual database still needs the explicit migration steps below. No request creates tables, adds columns or stamps a migration automatically.
+
+## 4. Food images
+
+Five actual photographs, matched to the existing dish names, are bundled and served at `/api/menu-items/photos/<filename>`. This avoids external hotlink failures and does not update menu rows. Existing manager-uploaded URLs take priority; unrecognized dishes continue to use the existing neutral fallback.
+
+Verified JPEG responses and real browser image decoding. Customer menu, daily-meal cards and details use the shared paths. The manager menu now normalizes those paths too. The waiter dashboard has no food-image component, so its layout was preserved.
+
+These are **representative photographs of the dishes**, not photographs of QuickBite’s own plating. Sources, photographers and CC BY-SA/CC0 licenses are in [the bundled image credits](backend/app/static/menu/README.md) and the public `/api/menu-items/photo-credits` page, linked from the menu. For example, the beef image is explicitly documented as [Kenyan pilau rice and beef](https://commons.wikimedia.org/wiki/File:Pilau_Rice_(Mixed_Spiced_Rice)_&_Beef.jpg).
+
+Cloudinary remains available for your own photographs. Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET`; no Cloudinary upload was attempted or claimed. Bundled photos require no hosting credentials.
+
+## 5. WhatsApp
+
+The official Business Cloud API integration now supports these unique order events:
+
+| Trigger | Event |
+|---|---|
+| Order committed | `order_received` |
+| Staff confirms Cash/Card or Daraja verifies success | `payment_confirmed` |
+| Waiter advances to Preparing | `preparing` |
+| Waiter advances to Ready | `ready` |
+| Waiter advances to Served | `completed` |
+
+Each event is persisted once per order and claimed atomically before sending. Repeated confirmations/updates do not send it again. Receipt messages retain their separate one-time delivery claim and QR/link template. Network errors, unexpected responses and notification database errors are isolated from committed ordering/payment operations.
+
+Provider acceptance is stored as `accepted`, not falsely as delivered. Signed webhooks update sent, delivered, read and failed status for both receipt and event records. Duplicate/older statuses do not undo delivered/read states. Failures are recorded; no automatic resend occurs during subsequent order updates.
+
+Verification endpoint: `GET /api/receipts/whatsapp/webhook`.
+Delivery endpoint: `POST /api/receipts/whatsapp/webhook` with HMAC-SHA256 `X-Hub-Signature-256`.
+
+**No real WhatsApp message was sent.** Credentials and approved templates are absent. Mocked send, duplicate, exception, signature and delivery-state tests passed. The integration follows [Meta’s official webhook guidance](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/receivingMessages/) and its [Business Platform API collection](https://www.postman.com/meta/whatsapp-business-platform/overview).
+
+A process interrupted after sending but before recording provider acceptance can leave a `sending` record. Reconcile it with the provider before manually retrying; blind retries could send a duplicate.
+
+## 6. Database and backup procedure
+
+The actual database was inspected in SQLite read-only mode. All migration applications, rollback tests, fixture writes and order submissions used databases under `/tmp` or the dedicated temporary PostgreSQL cluster on port 55432.
+
+A fresh copy of the actual database was validated, backed up, adopted and migrated. **Every original row and every original column value matched afterward**, not just row counts:
+
+| Table | Preserved rows |
+|---|---:|
+| menu_items | 5 |
+| staff_users | 2 |
+| waiter_profiles | 1 |
+| shifts | 0 |
+| orders | 7 |
+| staff_sessions | 2 |
+| weekly_shifts | 0 |
+| order_items | 14 |
+| receipts | 7 |
+
+New migration: `c3d4e5f6a7b8`, parent `b2c3d4e5f6a7`. It adds nullable retry metadata and the notification table with unique order/event and provider-ID constraints. It does not remove existing records. Upgrade/schema parity and downgrade/re-upgrade passed on isolated SQLite/PostgreSQL databases. A downgrade removes new notification data, so do not run it on your actual database merely for testing.
+
+**Manual commands for the currently configured unversioned SQLite database, from the project root:**
+
+1. Stop your actual Flask service so no orders change during backup/migration.
+2. Validate the supported historical schema and create a verified backup:
+
+   ```bash
+   venv/bin/python backend/manage_legacy_db.py
+   venv/bin/python backend/manage_legacy_db.py --backup-only
+   ```
+
+   The second command uses SQLite’s backup API, runs `PRAGMA integrity_check`, prints the unique backup path under `backend/backups/`, and changes no source records or schema. Keep a separate copy of that backup and verify the printed integrity success before proceeding.
+
+3. Only when you are ready to authorize and apply the database update:
+
+   ```bash
+   venv/bin/python backend/manage_legacy_db.py --apply
+   cd backend
+   ../venv/bin/flask --app run db check
+   ../venv/bin/python run.py
+   ```
+
+   `--apply` takes another verified backup before stamping the validated historical baseline and upgrading. Unsupported schemas are rejected. Do not blindly stamp/reset the database.
+
+4. In a second terminal, from the project root:
+
+   ```bash
+   npm run dev
+   ```
+
+For an **already-versioned** database, use `flask --app run db upgrade` from `backend` only after a verified backup. For PostgreSQL, take a `pg_dump --format=custom` backup and verify it in a separate restore database before upgrading. Do not use the legacy SQLite adoption tool on PostgreSQL.
+
+## 7. Security
+
+- Guest ownership, JWT HttpOnly cookies, staff role checks and CSRF remain enforced.
+- Cookie sessions are not replaced by frontend authentication tokens.
+- Cross-origin checkout allows the `Idempotency-Key` header only under existing configured origins.
+- Retry keys cannot reveal another guest’s order or silently change an existing order’s contents.
+- Secure database prices, merged duplicate item lines and stock validation remain authoritative.
+- Production now also rejects JWT signing secrets shorter than 32 characters.
+- Receipt URLs remain random; receipt tokens and callback/webhook verification secrets are redacted in application access logs. Configure the same redaction in upstream proxy logs.
+- WhatsApp signatures must have the correct hexadecimal format before constant-time validation; malformed/non-ASCII signatures return 403.
+- Image URL handling rejects unsafe schemes, invalid URLs and embedded credentials. Cloudinary credentials stay backend-only.
+- The remaining secret/database setup is explicit; no security check was bypassed to make an outdated schema work.
+
+## 8. Tests: commands and actual results
+
+Run from `backend` unless stated otherwise:
 
 ```bash
-venv/bin/pip install -r backend/requirements.txt
-cp backend/.env.example backend/.env
-# Edit backend/.env with your database, origins, secrets and providers.
+../venv/bin/python -m pytest tests -q
+```
 
-# The existing local SQLite database has no Alembic version:
-venv/bin/python backend/manage_legacy_db.py
-venv/bin/python backend/manage_legacy_db.py --apply
+**SQLite: 37 passed, 0 failed, no warnings.** Includes a disposable migration regression database.
 
-# For an already-versioned database or a new database instead:
-cd backend
+```bash
+QUICKBITE_TEST_DATABASE_URL='postgresql+psycopg://surleen@/quickbite_test?host=/tmp/quickbite-pgsocket&port=55432&client_encoding=utf8' \
+  ../venv/bin/python -m pytest tests -q
+```
+
+**PostgreSQL: 37 passed, 0 failed, no warnings.** API tests use only `quickbite_test`; the migration regression separately uses disposable SQLite. The temporary cluster did not use your actual PostgreSQL service.
+
+For isolated PostgreSQL migration verification, `DATABASE_URL` was set to:
+
+```text
+postgresql+psycopg://surleen@/quickbite_migration_test?host=/tmp/quickbite-pgsocket&port=55432&client_encoding=utf8
+```
+
+The following commands were executed there and passed:
+
+```bash
 ../venv/bin/flask --app run db upgrade
 ../venv/bin/flask --app run db check
-../venv/bin/python run.py
+../venv/bin/flask --app run db downgrade b2c3d4e5f6a7
+../venv/bin/flask --app run db upgrade
 ```
 
-In a second terminal from the project root:
+The migrated actual-database **copy** also passed `db check`. Backup-only/adoption commands were tested against `/tmp/quickbite-remaining-verified-copy.sqlite`; actual records were compared read-only afterward.
+
+From the project root:
 
 ```bash
-npm --prefix frontend run dev
-```
-
-For production, set `APP_ENV=production`, HTTPS origins and `COOKIE_SECURE=true`; use a WSGI server such as `gunicorn run:app` from `backend`. New staff accounts can be created through the existing manager-authorized API. For an initial manager, after migrations:
-
-```bash
-cd backend
-../venv/bin/python seed_staff.py manager "Manager Name"
-# Password is prompted securely; no known default password is created.
-```
-
-Environment variables are fully enumerated in `backend/.env.example` and `frontend/.env.example`:
-
-- App/database: `APP_ENV`, `SECRET_KEY`, `JWT_SECRET_KEY`, `DATABASE_URL`, `FRONTEND_ORIGIN`, `COOKIE_SECURE`, `FLASK_DEBUG`, `PUBLIC_API_URL`.
-- M-Pesa: `MPESA_ENVIRONMENT`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`, `MPESA_CALLBACK_URL`, `MPESA_CALLBACK_SECRET`, `MPESA_TRANSACTION_TYPE`, `MPESA_FORCE_1_KSH`.
-- WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_API_VERSION`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`.
-- Existing image uploads: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
-- Frontend: `VITE_API_BASE_URL`, accepting `/api`, a deployed API root, or the legacy `/api/menu-items` URL. Never put provider credentials in Vite variables.
-- Optional initial staff creation: `INITIAL_STAFF_PASSWORD`; otherwise a hidden password prompt is used.
-
-Provider setup and remaining limitations:
-
-1. **Food photos:** every current local menu row has a NULL image. No correct source photographs were available to restore. Upload each actual dish photo through the existing manager image controls after configuring Cloudinary, or save its correct accessible image URL. Missing photos display a neutral local illustration; existing valid URLs are retained.
-2. **Kids:** the section appears when actual menu records use the `Kids` category. No fabricated production food records were inserted.
-3. **M-Pesa:** obtain your Daraja sandbox/production credentials and shortcode/passkey. Set a publicly reachable HTTPS callback URL and a URL-safe callback secret. The app appends the secret to the callback request URL and redacts it in application access logs; receipt tokens are also redacted. Configure upstream proxy logs to redact that query parameter and receipt URL tokens too. Success requires matching stored amount/phone and a successful independent Daraja status query. KSh 1 mode is explicit and sandbox-only. Verify end-to-end in your own Daraja sandbox before production.
-4. **WhatsApp:** configure a legitimate WhatsApp Business sender, token and approved English utility template with an image header and two body parameters: receipt number and receipt URL. The QR image is used as the header. Obtain the customer's WhatsApp opt-in. Configure delivery callbacks at `/api/receipts/whatsapp/webhook` and the app/verification secrets. Provider acceptance is stored as `accepted`, never falsely as delivered; signed callbacks supply delivery/read/failure status.
-5. **External delivery failures:** the receipt remains accessible. Failed/unconfigured notifications are recorded and not automatically resent on repeated payment callbacks. Requests interrupted after the atomic delivery claim can remain `sending` and need provider reconciliation before any manual retry.
-6. **Guest ordering:** the existing account-free customer flow is preserved, authenticated by a separate signed HttpOnly guest cookie. Customer account registration/password login was not added. Historical orders without an ownership cookie remain accessible to authorized staff and by existing secure receipt links; predictable order IDs cannot recover them.
-7. **Legacy staff mapping:** review unmatched profiles rather than guessing account IDs. Historical records without `served_at` have no fabricated serving-time average. Hours use recorded shift timestamps, and display dates use timezone-aware UTC values with local formatting.
-8. **Card payments:** the previous browser-only demo could mark orders paid without processing money. Card now means payment at the restaurant; authorized staff confirm actual receipt of Cash/Card money. No online card processor is configured or claimed.
-9. **Pending STK requests:** a missing callback leaves a payment pending rather than inventing success. Operator reconciliation with Daraja is required for requests whose outcome remains unknown. Inventory is reserved when the order is placed.
-10. Apply migrations to your real database after backup/review. Production cookies and CORS are configured and tested locally; deployment/browser policies must still be verified on your real HTTPS domains. No production deployment was performed.
-
-The independent status query follows the [Safaricom SDK endpoint](https://github.com/safaricom/mpesa-php-sdk/blob/master/src/Mpesa.php); WhatsApp template structure follows [Meta's official Business Platform collection](https://www.postman.com/meta/whatsapp-business-platform/request/n3jhmr4/create-template-w-image-header-text-body-text-footer-and-2-call-to-action-buttons).
-
-Test commands:
-
-```bash
-cd backend
-../venv/bin/python -m unittest discover -s tests -v
-# PostgreSQL alternative: use ONLY a separate database named quickbite_test.
-QUICKBITE_TEST_DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST/quickbite_test' \
-  ../venv/bin/python -m unittest discover -s tests -v
-
-cd ../frontend
 npm test
 npm run lint
 npm run build
 ```
 
-Temporary test servers and the test database cluster were stopped after verification. The pre-existing frontend process was retained.
+**Frontend: 25 passed, 0 failed; ESLint passed; production build passed without warnings.**
 
-The PostgreSQL verification used a temporary cluster on port 55432 with a Unix socket under `/tmp/quickbite-pgsocket`, not the existing PostgreSQL service. UTF-8 client encoding was explicitly configured. Test engines are disposed after each test.
+Live application commands used:
 
-Reproducible browser checks are in `backend/tests/e2e/`. They use explicit test credentials and the fixed `/tmp/quickbite-verification.sqlite` fixture database, never production data. Install `backend/requirements-dev.txt` and `playwright install chromium`. Migrate that temporary database, run `fixture_server.py`, run Vite on port 5174, then run `browser_smoke.py`. Browser screenshots are written under `/tmp/quickbite-*.png`.
-
-Files changed in this task (some already contained user edits):
-
-```text
-.github/workflows/backend-ci.yml
-.github/workflows/frontend-ci.yml
-backend/.env.example
-backend/app/__init__.py
-backend/app/config.py
-backend/app/models/__init__.py
-backend/app/models/order.py
-backend/app/models/shift.py
-backend/app/models/waiter_profile.py
-backend/app/models/payment.py
-backend/app/models/receipt.py
-backend/app/routes/auth.py
-backend/app/routes/complaints.py
-backend/app/routes/manager.py
-backend/app/routes/menu_items.py
-backend/app/routes/orders.py
-backend/app/routes/payments.py
-backend/app/routes/receipts.py
-backend/app/routes/waiter.py
-backend/app/routes/waiter_profiles.py
-backend/app/services/activity.py
-backend/app/services/mpesa.py
-backend/app/services/notifications.py
-backend/app/utils/auth.py
-backend/app/utils/customer.py
-backend/app/utils/logging.py
-backend/app/utils/timing.py
-backend/manage_legacy_db.py
-backend/migrations/versions/56083bda4427_add_waiter_assignment_to_orders.py
-backend/migrations/versions/a1b2c3d4e5f6_add_receipts_and_prep_timing.py
-backend/migrations/versions/b2c3d4e5f6a7_secure_orders_and_activity.py
-backend/requirements.txt
-backend/requirements-dev.txt
-backend/run.py
-backend/seed_staff.py
-backend/tests/test_api.py
-backend/tests/test_features.py
-backend/tests/e2e/fixture_server.py
-backend/tests/e2e/browser_smoke.py
-frontend/.env.example
-frontend/public/images/meal-unavailable.svg
-frontend/src/App.jsx
-frontend/src/components/Navbar.jsx
-frontend/src/components/ManagerOperations.jsx
-frontend/src/components/checkout/DemoPayment.jsx
-frontend/src/components/checkout/OrderConfirmation.jsx
-frontend/src/components/customer/CustomerForm.jsx
-frontend/src/components/menu/FoodCard.jsx
-frontend/src/components/waiter/OrderCard.jsx
-frontend/src/components/waiter/ReceiptPreview.jsx
-frontend/src/components/waiter/WaiterRecord.jsx
-frontend/src/components/waiter/WaiterRoster.jsx
-frontend/src/features.test.jsx
-frontend/src/pages/CustomerDetails.jsx
-frontend/src/pages/FoodDetails.jsx
-frontend/src/pages/ManagerDashboard.jsx
-frontend/src/pages/Menu.jsx
-frontend/src/pages/OrderStatus.jsx
-frontend/src/pages/Payment.jsx
-frontend/src/pages/StaffLogin.jsx
-frontend/src/pages/WaiterDashboard.jsx
-frontend/src/services/api.js
-frontend/src/services/waiterApi.js
-frontend/src/utils/orderHelpers.js
-requirements.txt
-IMPLEMENTATION_REPORT.md
+```bash
+# Migrate only the disposable browser fixture database first:
+cd backend
+DATABASE_URL=sqlite:////tmp/quickbite-verification.sqlite ../venv/bin/flask --app run db upgrade
+cd ..
+venv/bin/python backend/tests/e2e/fixture_server.py
+# Separate terminal:
+cd frontend
+QUICKBITE_PROXY_TARGET=http://127.0.0.1:5500 npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+# Separate terminal, project root:
+PLAYWRIGHT_BROWSERS_PATH=/tmp/quickbite-browsers venv/bin/python backend/tests/e2e/browser_smoke.py
 ```
 
-Other pre-existing work retained without editing in this task includes `menu_item.py`, `order_item.py`, `complaint.py`, the deletion of `backend/app/services/managerApi.py`, `seed_initial_menu.py`, frontend ESLint/test setup, `App.test.jsx`, `CartContext.jsx`, staged `index.css`, `main.jsx`, `Games.jsx`, `staffApi.js`, Vite configuration, the root package file and the untracked SQLite database.
+**Chromium passed:** menu/search, bundled photo decoding and fallback images, password toggle, manager login/dashboard, mobile Cash checkout, Card-at-restaurant checkout, receipt/QR display, order tracking, waiter login/dashboard, M-Pesa missing-credential handling, preserved cart and retry without duplicate order creation. No unhandled JavaScript page errors; the expected 503 configuration response is exercised deliberately. Responsive payment labels and page width were checked at 390px.
+
+`git diff --check` passed. The pytest import and Alembic/JWT test warnings encountered during investigation were corrected rather than suppressed. No real payment/message delivery was claimed from mocked tests.
+
+## 9. Manual configuration
+
+Use `backend/.env.example`; no credentials were invented or written into your actual `.env`.
+
+**Application:**
+
+```text
+DATABASE_URL
+SECRET_KEY                  # random, at least 32 characters
+JWT_SECRET_KEY              # distinct random value, at least 32 characters
+APP_ENV                     # production for deployment
+COOKIE_SECURE               # true on HTTPS deployment
+FRONTEND_ORIGIN             # exact frontend origin
+PUBLIC_API_URL              # public HTTPS backend origin for receipt/QR URLs
+FLASK_DEBUG                 # false in deployment
+```
+
+**Daraja:**
+
+```text
+MPESA_ENVIRONMENT           # sandbox initially; production only with production credentials
+MPESA_CONSUMER_KEY
+MPESA_CONSUMER_SECRET
+MPESA_SHORTCODE
+MPESA_PASSKEY
+MPESA_CALLBACK_URL          # public HTTPS /api/payments/callback
+MPESA_CALLBACK_SECRET       # long URL-safe random value
+MPESA_TRANSACTION_TYPE      # normally CustomerPayBillOnline
+MPESA_FORCE_1_KSH           # false normally; explicit sandbox-only testing option
+```
+
+Create/select your Daraja app and provide credentials/shortcode/passkey for its environment. Make the callback publicly reachable and verify real sandbox STK confirmation before production. KSh 1 mode is rejected in production.
+
+**Meta WhatsApp:**
+
+```text
+WHATSAPP_ACCESS_TOKEN
+WHATSAPP_PHONE_NUMBER_ID
+WHATSAPP_BUSINESS_ACCOUNT_ID  # optional setup/WABA identifier, not required for sending
+WHATSAPP_APP_SECRET
+WHATSAPP_VERIFY_TOKEN
+WHATSAPP_API_VERSION          # supported Graph API version
+WHATSAPP_TEMPLATE_NAME        # existing approved receipt template
+WHATSAPP_ORDER_TEMPLATE_NAME  # approved order-event template
+WHATSAPP_TEMPLATE_LANGUAGE    # language code matching approval, default en
+```
+
+In Meta’s WhatsApp Manager:
+
+- Register/configure the business phone and appropriate API token/permissions. Obtain customer opt-in for notifications.
+- Approve a receipt utility template with an **IMAGE header** and two BODY parameters: receipt number and receipt URL. The header receives the QR PNG URL.
+- Approve an order-event utility template with two BODY parameters: order ID and event description. Suggested text: `QuickBite order {{1}}: {{2}}.` Use examples representing the actual event labels.
+- Configure callback URL `https://YOUR_BACKEND/api/receipts/whatsapp/webhook` and the matching verification token. Subscribe to the WhatsApp **messages** webhook field and connect the app to the WABA.
+- Set the Meta app secret used to validate delivery signatures. Confirm sent/delivered/read/failed events against your real sender; API acceptance alone is not delivery.
+
+**Optional Cloudinary uploads:** `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
+
+**Frontend:** `VITE_API_BASE_URL=/api` for the usual proxy, or the deployed backend API root. Backend secrets never belong in Vite variables. `QUICKBITE_PROXY_TARGET` is an optional development-server override used to isolate browser tests; the normal target remains port 5000.
+
+For tests, install `venv/bin/pip install -r backend/requirements-dev.txt`. Playwright browser assets are needed only for the live browser script.
+
+## 10. Remaining work
+
+1. **You must explicitly apply the verified database migration.** Per your instruction, no migration was applied to the actual database. Until then, its order API correctly reports the pending database update.
+2. Configure and test your actual Daraja sandbox credentials/public callback. No real STK payment was made.
+3. Configure Meta credentials, approved templates, WABA subscription and a public receipt/webhook origin; verify actual delivery with opted-in recipients. No real WhatsApp message was sent.
+4. Replace bundled representative food photos with your own Cloudinary uploads if desired. Existing five menu items already have suitable bundled images through API resolution.
+5. Customer registration remains a future enhancement; guest checkout is intentionally retained. Production deployment and real-origin cookie/browser verification remain manual.
+6. An externally accepted STK request whose response/callback is lost still needs provider reconciliation; the app never invents payment success. Likewise, reconcile interrupted `sending` notifications before retrying them.
+
+No commit or push was performed. The existing backend on port 5000 was not stopped or replaced. Temporary test services are stopped after verification.

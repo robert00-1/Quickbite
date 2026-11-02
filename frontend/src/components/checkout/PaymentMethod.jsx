@@ -11,13 +11,13 @@ function PaymentMethod({ selected, onSelect }) {
             key={method}
             type="button"
             onClick={() => onSelect(method)}
-            className={`rounded-lg border-2 px-4 py-3 font-semibold transition ${
+            className={`min-w-0 rounded-lg border-2 px-2 py-3 text-sm font-semibold sm:px-4 sm:text-base transition ${
               selected === method
                 ? "border-red-500 bg-red-50 text-red-600"
                 : "border-gray-200 text-gray-700 hover:border-red-300"
             }`}
           >
-            {method}
+            {method === "Card" ? "Card at restaurant" : method === "Cash" ? "Cash at restaurant" : method}
           </button>
         ))}
       </div>

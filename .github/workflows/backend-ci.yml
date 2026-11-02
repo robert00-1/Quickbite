@@ -11,13 +11,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - run: python -m unittest discover -s tests -v
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests -q
       - name: Check SQLite migration chain
         env:
           DATABASE_URL: sqlite:////tmp/quickbite-ci.sqlite
         run: |
           flask --app run db upgrade
           flask --app run db check
-          flask --app run db downgrade a1b2c3d4e5f6
+          flask --app run db downgrade b2c3d4e5f6a7
           flask --app run db upgrade

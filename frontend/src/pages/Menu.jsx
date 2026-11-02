@@ -1,5 +1,8 @@
+import Pagination from "../components/Pagination";
+import usePagination from "../hooks/usePagination";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { API_ROOT } from "../services/staffApi";
 import { getMeals, FALLBACK_IMAGE } from "../services/api";
 import { useCart } from "../context/CartContext";
 import FoodCard from "../components/menu/FoodCard";
@@ -35,29 +38,36 @@ function Menu() {
   };
 
   const requestVersion = useRef(0);
-  const fetchMeals = useCallback(async () => {
+  const fetchMeals = useCallback(async (signal, refreshCategories = false) => {
     const version = ++requestVersion.current;
+    const params = new URLSearchParams();
+    if (debouncedSearchTerm) params.set("search", debouncedSearchTerm);
+    if (selectedCategory !== "All") params.set("category", selectedCategory);
+    if (minPrice !== "") params.set("min_price", minPrice);
+    if (maxPrice !== "") params.set("max_price", maxPrice);
+    const query = params.toString();
+    const updateCategories = (items) => {
+      const available = [...new Set(items.map((item) => item.category).filter(Boolean))];
+      setAllCategories(available);
+      if (selectedCategory !== "All" && !available.includes(selectedCategory)) setSelectedCategory("All");
+    };
     try {
-      const params = new URLSearchParams();
-      if (debouncedSearchTerm) params.set("search", debouncedSearchTerm);
-      if (selectedCategory && selectedCategory !== "All")
-        params.set("category", selectedCategory);
-      if (minPrice) params.set("min_price", minPrice);
-      if (maxPrice) params.set("max_price", maxPrice);
-
-      const data = await getMeals(params.toString());
-      const all = await getMeals();
-      if (version !== requestVersion.current) return;
-      setMeals(Array.isArray(data) ? data : []);
-      const availableCategories = [...new Set(all.map((m) => m.category).filter(Boolean))];
-      setAllCategories(availableCategories);
-      if (selectedCategory !== "All" && !availableCategories.includes(selectedCategory)) setSelectedCategory("All");
-      setError("");
+      const data = await getMeals(query, signal);
+      if (signal.aborted || version !== requestVersion.current) return;
+      setMeals(data);
+      setError(data.warning || "");
+      if (!query) updateCategories(data);
+      // A category refresh must never discard a successful menu response.
+      else if (refreshCategories) {
+        getMeals("", signal).then((items) => {
+          if (!signal.aborted && version === requestVersion.current) updateCategories(items);
+        }).catch(() => {});
+      }
     } catch (err) {
-      console.error("Menu loading error:", err);
-      setError("Unable to load menu. Please try again.");
+      if (signal.aborted || version !== requestVersion.current) return;
+      setError(err.message || "Unable to load menu. Please try again.");
     } finally {
-      if (version === requestVersion.current) setLoading(false);
+      if (!signal.aborted && version === requestVersion.current) setLoading(false);
     }
   }, [debouncedSearchTerm, selectedCategory, minPrice, maxPrice]);
 
@@ -69,16 +79,16 @@ function Menu() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Fetch when filters change
+  // One initial inventory request; cancel obsolete filter/poll requests.
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    fetchMeals();
-  }, [fetchMeals]);
-
-  // Poll for updates every 15 seconds
-  useEffect(() => {
-    const id = setInterval(fetchMeals, 15000);
-    return () => clearInterval(id);
+    fetchMeals(controller.signal);
+    const interval = setInterval(() => fetchMeals(controller.signal, true), 15000);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [fetchMeals]);
 
   const categories = [
@@ -86,16 +96,13 @@ function Menu() {
     ...allCategories,
   ];
 
-  // Filter client-side (in addition to server-side for UX responsiveness)
-  const filteredMeals = meals.filter((meal) => {
-    const matchesMin = minPrice === "" || meal.price >= Number(minPrice);
-    const matchesMax = maxPrice === "" || meal.price <= Number(maxPrice);
-    return matchesMin && matchesMax;
-  });
+  // The backend applies the requested filters; render every returned product.
+  const filteredMeals = meals;
 
+  const pagination = usePagination(filteredMeals, JSON.stringify([searchTerm, selectedCategory, minPrice, maxPrice]));
   const mealsOfDay = filteredMeals.filter((m) => m.is_food_of_day === true);
-  const kidsMeals = filteredMeals.filter((m) => m.category === "Kids");
-  const otherMeals = filteredMeals.filter(
+  const kidsMeals = pagination.items.filter((m) => m.category === "Kids");
+  const otherMeals = pagination.items.filter(
     (m) => m.category !== "Kids"
   );
 
@@ -106,7 +113,7 @@ function Menu() {
   }
 
   return (
-    <main className="mx-auto max-w-[1200px] px-5 py-8">
+    <main aria-busy={loading} className="mx-auto max-w-[1200px] px-5 py-8">
       {/* Header — no "View Cart" button; cart is in navbar */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">
@@ -178,6 +185,9 @@ function Menu() {
         </section>
       )}
 
+      <section aria-label="Meals Available">
+      <h2 className="mb-2 text-2xl font-bold text-gray-800">Meals Available</h2>
+      <p className="mb-5 text-sm text-gray-500">{pagination.total} meals available</p>
       {/* Kids Meals */}
       {kidsMeals.length > 0 && (
         <section className="mb-10">
@@ -200,9 +210,6 @@ function Menu() {
       {/* All Other Meals */}
       {otherMeals.length > 0 && (
         <section className="mb-10">
-          <h2 className="mb-5 text-2xl font-bold text-gray-800">
-            All Items
-          </h2>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {otherMeals.map((meal) => (
               <FoodCard
@@ -215,6 +222,9 @@ function Menu() {
           </div>
         </section>
       )}
+
+      <Pagination {...pagination} label="Meals Available" />
+      </section>
 
       {/* Comparison panel */}
       {compareMeals.length > 0 && (
@@ -263,6 +273,8 @@ function Menu() {
         </section>
       )}
 
+      <a className="mr-4 text-xs text-gray-500" href="https://www.themealdb.com" target="_blank" rel="noreferrer">Meal data and images: TheMealDB</a>
+      <a className="text-xs text-gray-500" href={`${API_ROOT}/menu-items/photo-credits`} target="_blank" rel="noreferrer">Food photo credits</a>
       {filteredMeals.length === 0 && !loading && (
         <p className="mt-10 text-center text-gray-500">
           No meals found matching your search.

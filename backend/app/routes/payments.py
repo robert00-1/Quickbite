@@ -1,291 +1,211 @@
-
-import base64
-from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
-
+import hmac
+import re
+import secrets
+from decimal import Decimal, InvalidOperation
 import requests
 from flask import Blueprint, current_app, jsonify, request
-import hmac
+from sqlalchemy.exc import SQLAlchemyError
 from ..utils.customer import owns_order
 from ..utils.auth import staff_required
-from ..services.notifications import confirm_receipt, deliver_receipt
-
+from ..services.notifications import confirm_receipt, safely_notify
 from ..extensions import db
 from ..models import Order, Payment
-from ..services.mpesa import get_access_token
+from ..services.mpesa import get_access_token, normalize_phone, configuration, stk_payload, password_fields, DarajaError
 
-payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
-
-
-def normalize_phone(phone):
-    """Convert Kenyan phone numbers to 2547XXXXXXXX format."""
-    import re
-    if not re.fullmatch(r"[+0-9 ()-]+", str(phone)):
-        raise ValueError("Enter a valid Kenyan phone number")
-    phone = "".join(char for char in str(phone) if char.isdigit())
-
-    if phone.startswith("0") and len(phone) == 10:
-        phone = "254" + phone[1:]
-    elif phone.startswith("7") and len(phone) == 9:
-        phone = "254" + phone
-    elif phone.startswith("1") and len(phone) == 9:
-        phone = "254" + phone
-
-    if len(phone) != 12 or not phone.startswith(("2547", "2541")):
-        raise ValueError(
-            "Enter a valid Kenyan phone number, such as 0712345678"
-        )
-
-    return phone
+payments_bp = Blueprint('payments', __name__, url_prefix='/api/payments')
+mpesa_bp = Blueprint('mpesa', __name__, url_prefix='/api/mpesa')
+ACTIVE = ('Initiating', 'Pending', 'Unknown')
+TERMINAL = ('Paid', 'Failed', 'Cancelled')
 
 
-@payments_bp.route("/stk-push", methods=["POST"])
-def initiate_stk_push():
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return jsonify({"error": "JSON object required"}), 400
-    order_id = data.get("order_id")
+def error(message, code, status):
+    return jsonify({'error': message, 'code': code}), status
 
-    if type(order_id) is not int or order_id < 1:
-        return jsonify({"error": "order_id is required"}), 400
 
-    order = Order.query.filter_by(id=order_id).with_for_update().first()
-
-    if not order:
-        return jsonify({"error": "Order not found"}), 404
-
-    if not owns_order(order):
-        return jsonify({"error": "Order not found"}), 404
-
-    if order.payment_method != "M-Pesa":
-        return jsonify({
-            "error": "This order was not placed using M-Pesa"
-        }), 400
-
-    if order.payment_status == "Paid":
-        return jsonify({"error": "This order is already paid"}), 409
-
-    # Only reject if an active pending request was created very recently (< 60s)
-    # otherwise allow retry.
-    if order.checkout_request_id and order.payment_status == "Pending":
-        return jsonify({
-            "error": "A payment request is pending. Check its status before retrying."
-        }), 409
-
-    shortcode = current_app.config.get("MPESA_SHORTCODE")
-    passkey = current_app.config.get("MPESA_PASSKEY")
-    callback_url = current_app.config.get("MPESA_CALLBACK_URL")
-
-    if not all([shortcode, passkey, callback_url, current_app.config.get("MPESA_CALLBACK_SECRET"), current_app.config.get("MPESA_CONSUMER_KEY"), current_app.config.get("MPESA_CONSUMER_SECRET")]):
-        return jsonify({
-            "error": "M-Pesa requires MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE, MPESA_PASSKEY, MPESA_CALLBACK_URL and MPESA_CALLBACK_SECRET"
-        }), 500
-
-    try:
-        if not callback_url.startswith("https://"):
-            raise ValueError("MPESA_CALLBACK_URL must be a publicly reachable HTTPS URL")
-        phone = normalize_phone(order.phone)
-
-        # Allow forcing 1 KSh in sandbox testing via MPESA_FORCE_1_KSH (default: True in dev)
-        force_one = str(current_app.config.get("MPESA_FORCE_1_KSH", "false")).lower() == "true"
-        if force_one and current_app.config.get("MPESA_ENVIRONMENT") == "production":
-            raise ValueError("MPESA_FORCE_1_KSH is only permitted in sandbox")
-        amount = 1 if force_one else int(Decimal(order.total).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-        if amount < 1:
-            return jsonify({"error": "Order amount must be at least KSh 1"}), 400
-
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        password = base64.b64encode(
-            f"{shortcode}{passkey}{timestamp}".encode()
-        ).decode()
-
-        access_token = get_access_token()
-
-        payload = {
-            "BusinessShortCode": shortcode,
-            "Password": password,
-            "Timestamp": timestamp,
-            "TransactionType": current_app.config.get(
-                "MPESA_TRANSACTION_TYPE", "CustomerPayBillOnline"
-            ),
-            "Amount": amount,
-            "PartyA": phone,
-            "PartyB": shortcode,
-            "PhoneNumber": phone,
-            "CallBackURL": callback_url + ("&" if "?" in callback_url else "?") + "secret=" + current_app.config["MPESA_CALLBACK_SECRET"],
-            "AccountReference": f"QuickBite{order.id}",
-            "TransactionDesc": f"QuickBite order {order.id}",
-        }
-
-        env = current_app.config.get("MPESA_ENVIRONMENT", "sandbox").lower()
-        domain = (
-            "https://api.safaricom.co.ke"
-            if env == "production"
-            else "https://sandbox.safaricom.co.ke"
-        )
-        stk_url = f"{domain}/mpesa/stkpush/v1/processrequest"
-
-        response = requests.post(
-            stk_url,
-            json=payload,
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        if str(result.get("ResponseCode")) != "0":
-            return jsonify({
-                "error": "Safaricom did not accept the STK Push request",
-                "details": result.get("ResponseDescription")
-                or result.get("errorMessage")
-                or "Request rejected",
-            }), 502
-
-        if not isinstance(result.get("CheckoutRequestID"), str) or not result["CheckoutRequestID"]:
-            return jsonify({"error": "Daraja returned no checkout identifier"}), 502
-        order.checkout_request_id = result["CheckoutRequestID"]
-        db.session.add(Payment(order_id=order.id, checkout_request_id=order.checkout_request_id, amount=amount, phone=phone, status="Pending"))
-        order.payment_status = "Pending"
+def mark_attempt(payment_id, status):
+    payment = db.session.get(Payment, payment_id)
+    if payment and payment.status in ACTIVE:
+        payment.status = status
+        order = db.session.get(Order, payment.order_id)
+        if status == 'Failed' and order.checkout_request_id == payment.checkout_request_id and order.payment_status != 'Paid':
+            order.payment_status = 'Failed'
         db.session.commit()
 
-        return jsonify({
-            "message": "STK Push sent. Check the customer's phone.",
-            "order_id": order.id,
-            "checkout_request_id": order.checkout_request_id,
-            "customer_message": result.get("CustomerMessage"),
-            "payment_status": order.payment_status,
-        }), 200
 
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except requests.RequestException:
+@payments_bp.post('/stk-push')
+@mpesa_bp.post('/stk-push')
+def initiate_stk_push():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or type(data.get('order_id')) is not int or data['order_id'] < 1:
+        return error('A valid order_id is required.', 'invalid_order', 400)
+    order = Order.query.filter_by(id=data['order_id']).with_for_update().first()
+    if order is None or not owns_order(order):
+        return error('Order not found.', 'order_not_found', 404)
+    if order.payment_method != 'M-Pesa':
+        return error('This order was not placed using M-Pesa.', 'invalid_payment_method', 400)
+    if order.payment_status == 'Paid':
+        return error('This order is already paid.', 'already_paid', 409)
+    if Payment.query.filter(Payment.order_id == order.id, Payment.status.in_(ACTIVE)).first():
+        return error('A payment request is pending or awaiting reconciliation. Check its status before retrying.', 'payment_pending', 409)
+    try:
+        payload = stk_payload(order, data.get('phone', order.phone))
+    except DarajaError as exc:
+        return error(str(exc), exc.code, exc.status)
+
+    # Claim once in a short transaction, before any external STK call. A timeout
+    # cannot turn into a blind retry that sends another prompt/charge.
+    previous = order.checkout_request_id
+    reservation = 'init_' + secrets.token_hex(20)
+    order_id = order.id
+    try:
+        claimed = Order.query.filter(Order.id == order_id, Order.checkout_request_id == previous, Order.payment_status != 'Paid').update({'checkout_request_id': reservation, 'payment_status': 'Pending'}, synchronize_session=False)
+        if not claimed:
+            db.session.rollback()
+            return error('Another payment request is in progress.', 'payment_pending', 409)
+        payment = Payment(order_id=order_id, checkout_request_id=reservation, amount=payload['Amount'], phone=payload['PhoneNumber'], status='Initiating')
+        db.session.add(payment)
+        db.session.commit()
+        payment_id = payment.id
+    except SQLAlchemyError:
         db.session.rollback()
-        current_app.logger.exception("M-Pesa STK Push request failed")
-        return jsonify({
-            "error": "Could not reach Safaricom. Please try again."
-        }), 502
-    except Exception:
+        return error('Unable to start the payment request. Please retry.', 'payment_start_failed', 503)
+    try:
+        token = get_access_token()
+    except DarajaError as exc:
+        mark_attempt(payment_id, 'Failed')
+        return error(str(exc), exc.code, exc.status)
+    try:
+        response = requests.post(configuration()['domain'] + '/mpesa/stkpush/v1/processrequest', json=payload, headers={'Authorization': f'Bearer {token}'}, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError()
+        if str(result.get('ResponseCode')) != '0':
+            mark_attempt(payment_id, 'Failed')
+            return error('Daraja rejected the payment request. Please retry or ask restaurant staff for help.', 'stk_rejected', 502)
+        checkout = result.get('CheckoutRequestID')
+        if not isinstance(checkout, str) or not 1 <= len(checkout) <= 100:
+            raise ValueError()
+        # Re-read after the HTTP call; callback may already have completed it.
+        order = Order.query.filter_by(id=order_id).with_for_update().one()
+        payment = db.session.get(Payment, payment_id)
+        order.checkout_request_id = checkout
+        payment.checkout_request_id = checkout
+        if payment.status == 'Initiating':
+            payment.status = 'Pending'
+        db.session.commit()
+        return jsonify({'message': 'M-Pesa request accepted; payment is pending.', 'order_id': order_id, 'payment_status': order.payment_status}), 200
+    except requests.HTTPError as exc:
         db.session.rollback()
-        current_app.logger.exception("Unexpected STK Push error")
-        return jsonify({"error": "Could not initiate payment"}), 500
+        rejected = exc.response is not None and exc.response.status_code in (400, 401, 403, 404, 422)
+        mark_attempt(payment_id, 'Failed' if rejected else 'Unknown')
+        return error('Daraja rejected the request. Please check the phone number or ask restaurant staff to check payment configuration.' if rejected else 'Daraja outcome is unknown. Do not pay again until staff reconcile it.', 'stk_rejected' if rejected else 'payment_outcome_unknown', 502)
+    except (requests.RequestException, ValueError, TypeError):
+        db.session.rollback()
+        mark_attempt(payment_id, 'Unknown')
+        return error('Daraja did not return a confirmed response. Do not pay again yet; check the order status or ask staff to reconcile it.', 'payment_outcome_unknown', 502)
+    except SQLAlchemyError:
+        db.session.rollback()
+        return error('The payment request needs reconciliation. Do not send another payment.', 'payment_outcome_unknown', 503)
 
 
-@payments_bp.route("/callback", methods=["POST"])
+def parse_callback(data):
+    if not isinstance(data, dict) or not isinstance(data.get('Body'), dict) or not isinstance(data['Body'].get('stkCallback'), dict):
+        raise ValueError()
+    callback = data['Body']['stkCallback']
+    checkout = callback.get('CheckoutRequestID')
+    code = callback.get('ResultCode')
+    if not isinstance(checkout, str) or not checkout or len(checkout) > 100 or type(code) not in (int, str) or not str(code).isdigit():
+        raise ValueError()
+    return callback, checkout, int(code)
+
+
+@payments_bp.post('/callback')
+@mpesa_bp.post('/callback')
 def mpesa_callback():
-    expected_secret = current_app.config.get("MPESA_CALLBACK_SECRET")
-    if not expected_secret or not hmac.compare_digest(request.args.get("secret", ""), expected_secret):
-        return jsonify({"error": "Invalid callback credential"}), 403
-    callback_data = request.get_json(silent=True) or {}
-    if not isinstance(callback_data, dict) or not isinstance(callback_data.get("Body"), dict) or not isinstance(callback_data["Body"].get("stkCallback"), dict):
-        return jsonify({"error": "Invalid callback"}), 400
-    stk_callback = (
-        callback_data.get("Body", {}).get("stkCallback", {})
-    )
-
-    checkout_request_id = stk_callback.get("CheckoutRequestID")
-    result_code = stk_callback.get("ResultCode")
-    current_app.logger.info(
-    "M-Pesa callback received: checkout_request_id=%s result_code=%s",
-    checkout_request_id,
-    result_code,
-)
-
-    if not isinstance(checkout_request_id, str) or not checkout_request_id or result_code is None or not str(result_code).isdigit():
-        return jsonify({"Result": "Invalid callback"}), 400
-
-    order = Order.query.filter_by(
-        checkout_request_id=checkout_request_id
-    ).with_for_update().first()
-
-    if not order:
-        current_app.logger.warning(
-            "M-Pesa callback did not match an order: %s",
-            checkout_request_id,
-        )
-        # Acknowledge the callback without changing any order.
-        return jsonify({"Result": "Callback received"}), 200
-
-    if order.payment_status == "Paid":
-        return jsonify({"Result": "Callback already processed"}), 200
-    payment = Payment.query.filter_by(checkout_request_id=checkout_request_id).first()
+    try:
+        config = configuration()
+    except DarajaError as exc:
+        return error(str(exc), exc.code, 503)
+    secret = config['callback_secret']
+    if not secret or not hmac.compare_digest(request.args.get('secret', '').encode(), str(secret).encode()):
+        return error('Invalid callback credential.', 'invalid_callback', 403)
+    try:
+        callback, checkout, code = parse_callback(request.get_json(silent=True))
+    except ValueError:
+        return error('Invalid callback.', 'invalid_callback', 400)
+    payment = Payment.query.filter_by(checkout_request_id=checkout).first()
     if payment is None:
-        return jsonify({"error": "No recorded payment attempt"}), 409
-
-    if str(result_code) == "0":
-        callback_metadata = stk_callback.get("CallbackMetadata")
-        if not isinstance(callback_metadata, dict):
-            return jsonify({"error": "Payment metadata missing"}), 400
-        metadata_items = callback_metadata.get("Item", [])
-        if not isinstance(metadata_items, list) or not all(isinstance(i, dict) for i in metadata_items):
-            return jsonify({"error": "Invalid payment metadata"}), 400
-        metadata = {
-            item.get("Name"): item.get("Value")
-            for item in metadata_items
-            if item.get("Name")
-        }
-
-        receipt = metadata.get("MpesaReceiptNumber")
-        if not receipt:
-            current_app.logger.warning(
-                "Successful callback has no receipt number for order %s",
-                order.id,
-            )
-            return jsonify({"Result": "Receipt missing"}), 200
-
+        # A callback can beat the initial response; retry after the request ID is saved.
+        if Payment.query.filter_by(status='Initiating').first():
+            return error('Payment request is still being recorded.', 'payment_recording', 503)
+        return jsonify({'Result': 'Callback received'}), 200
+    if payment.status in TERMINAL:
+        return jsonify({'Result': 'Callback already processed'}), 200
+    payment_id, order_id = payment.id, payment.order_id
+    expected_amount, expected_phone = Decimal(payment.amount), payment.phone
+    receipt = None
+    if code == 0:
+        metadata = callback.get('CallbackMetadata')
+        values = metadata.get('Item') if isinstance(metadata, dict) else None
+        if not isinstance(values, list) or not all(isinstance(value, dict) and isinstance(value.get('Name'), str) for value in values):
+            return error('Payment metadata is missing or invalid.', 'invalid_callback', 400)
+        fields = {value['Name']: value.get('Value') for value in values}
+        if len(fields) != len(values):
+            return error('Payment metadata is duplicated.', 'invalid_callback', 400)
+        receipt = fields.get('MpesaReceiptNumber')
         try:
-            expected_amount = Decimal(payment.amount)
-            if Decimal(str(metadata.get("Amount"))) != expected_amount or normalize_phone(metadata.get("PhoneNumber")) != payment.phone:
-                return jsonify({"error": "Payment amount or phone does not match"}), 400
-            # Independently verify success with Daraja before accepting callback data.
-            shortcode = current_app.config["MPESA_SHORTCODE"]
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            password = base64.b64encode(f"{shortcode}{current_app.config['MPESA_PASSKEY']}{timestamp}".encode()).decode()
-            domain = "https://api.safaricom.co.ke" if current_app.config.get("MPESA_ENVIRONMENT") == "production" else "https://sandbox.safaricom.co.ke"
-            verified = requests.post(domain + "/mpesa/stkpushquery/v1/query", headers={"Authorization": "Bearer " + get_access_token()}, json={"BusinessShortCode": shortcode, "Password": password, "Timestamp": timestamp, "CheckoutRequestID": checkout_request_id}, timeout=20)
-            verified.raise_for_status()
-            if str(verified.json().get("ResultCode")) != "0":
-                return jsonify({"error": "Payment has not been verified by Daraja"}), 409
-        except (ValueError, TypeError, ArithmeticError, requests.RequestException):
-            return jsonify({"error": "Unable to verify payment"}), 502
-        duplicate = Order.query.filter(Order.mpesa_receipt_number == receipt, Order.id != order.id).first()
-        if duplicate:
-            return jsonify({"error": "Receipt already used"}), 409
-        order.payment_status = "Paid"
-        confirm_receipt(order)
+            amount = Decimal(str(fields.get('Amount')))
+            phone = normalize_phone(fields.get('PhoneNumber'))
+        except (InvalidOperation, ValueError):
+            return error('Payment amount or phone is invalid.', 'invalid_callback', 400)
+        if not amount.is_finite() or amount != expected_amount or phone != expected_phone or not isinstance(receipt, str) or not re.fullmatch(r'[A-Za-z0-9]{6,32}', receipt):
+            return error('Payment details do not match the recorded request.', 'payment_mismatch', 400)
+        # Never accept an unverified success, even when callback credentials match.
+        try:
+            timestamp, password = password_fields(config)
+            response = requests.post(config['domain'] + '/mpesa/stkpushquery/v1/query', headers={'Authorization': 'Bearer ' + get_access_token()}, json={'BusinessShortCode': config['shortcode'], 'Password': password, 'Timestamp': timestamp, 'CheckoutRequestID': checkout}, timeout=20)
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict) or str(result.get('ResultCode')) != '0':
+                return error('Daraja has not verified this payment as successful.', 'payment_not_verified', 409)
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            return error('Unable to verify payment with Daraja. Payment remains pending.', 'payment_verification_unavailable', 503)
+
+    # Serialize final state transitions only; no external calls while holding locks.
+    order = Order.query.filter_by(id=order_id).with_for_update().one()
+    payment = db.session.get(Payment, payment_id)
+    if payment.status in TERMINAL or order.payment_status == 'Paid':
+        return jsonify({'Result': 'Callback already processed'}), 200
+    if receipt and Order.query.filter(Order.mpesa_receipt_number == receipt, Order.id != order_id).first():
+        return error('Transaction has already been recorded.', 'duplicate_transaction', 409)
+    status = 'Paid' if code == 0 else 'Cancelled' if code == 1032 else 'Failed'
+    changed = Payment.query.filter(Payment.id == payment_id, Payment.status.in_(ACTIVE)).update({'status': status}, synchronize_session=False)
+    if not changed:
+        db.session.rollback()
+        return jsonify({'Result': 'Callback already processed'}), 200
+    order.payment_status = status
+    if receipt:
         order.mpesa_receipt_number = receipt
-
-        current_app.logger.info(
-            "M-Pesa payment successful: order_id=%s receipt=%s",
-            order.id,
-            receipt,
-        )
-    else:
-        order.payment_status = "Cancelled" if str(result_code) == "1032" else "Failed"
-
-        current_app.logger.warning(
-            "M-Pesa payment failed: order_id=%s result_code=%s",
-            order.id,
-            result_code,
-        )
-
-    payment.status = order.payment_status
-    db.session.commit()
-    if order.receipt:
-        deliver_receipt(order.receipt)
-
-    return jsonify({"Result": "Callback received"}), 200
+        confirm_receipt(order)
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return error('Payment could not be recorded. It will need verification again.', 'payment_record_failed', 503)
+    if status == 'Paid':
+        safely_notify(order, 'payment_confirmed', include_receipt=True)
+    return jsonify({'Result': 'Callback received'}), 200
 
 
 @payments_bp.post('/orders/<int:order_id>/confirm')
 @staff_required('waiter', 'manager')
 def confirm_counter_payment(order_id):
-    order = db.get_or_404(Order, order_id)
+    order = Order.query.filter_by(id=order_id).with_for_update().first_or_404()
     if order.payment_method not in ('Cash', 'Card'):
-        return jsonify({'error': 'M-Pesa must be confirmed by Daraja'}), 400
+        return error('M-Pesa must be confirmed by Daraja.', 'invalid_payment_method', 400)
     order.payment_status = 'Paid'
-    receipt = confirm_receipt(order)
+    confirm_receipt(order)
     db.session.commit()
-    deliver_receipt(receipt)
+    safely_notify(order, 'payment_confirmed', include_receipt=True)
     return jsonify({'message': 'Payment confirmed', 'payment_status': order.payment_status}), 200

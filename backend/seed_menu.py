@@ -9,21 +9,9 @@ from app.models.menu_item import MenuItem
 
 API_URL = "https://www.themealdb.com/api/json/v1/1"
 
-CATEGORY_PRICES = {
-    "Chicken": 450,
-    "Beef": 550,
-    "Lamb": 600,
-    "Pork": 500,
-    "Seafood": 650,
-    "Pasta": 400,
-    "Vegetarian": 350,
-    "Dessert": 300,
-    "Breakfast": 300,
-    "Miscellaneous": 400,
-}
+from app.services.menu_pricing import CATEGORY_PRICES
 
 CATEGORIES = list(CATEGORY_PRICES.keys())
-MEALS_PER_CATEGORY = 5
 
 
 def fetch_json(url):
@@ -43,7 +31,7 @@ def seed_menu():
             result = fetch_json(
                 f"{API_URL}/filter.php?c={category}"
             )
-            meals = (result.get("meals") or [])[:MEALS_PER_CATEGORY]
+            meals = (result.get("meals") or [])
 
             for meal in meals:
                 try:
@@ -103,7 +91,7 @@ def seed_menu():
     print(f"\nFinished! Added: {added}; skipped existing: {skipped}")
 
 
-app = create_app()
-
-with app.app_context():
-    seed_menu()
+if __name__ == "__main__":
+    app = create_app()
+    with app.app_context():
+        seed_menu()

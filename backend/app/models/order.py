@@ -7,6 +7,8 @@ class Order(db.Model):
     __tablename__ = "orders"
 
     id = db.Column(db.Integer, primary_key=True)
+    idempotency_key = db.Column(db.String(64), nullable=True, unique=True)
+    request_fingerprint = db.Column(db.String(64), nullable=True)
     customer_id = db.Column(db.String(64), nullable=True, index=True)
     served_at = db.Column(db.DateTime(timezone=True), nullable=True)
     customer_name = db.Column(db.String(120), nullable=False)

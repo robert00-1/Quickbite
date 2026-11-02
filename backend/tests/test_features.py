@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, Mock
 import unittest
-import test_api
+from tests import test_api
 from app.extensions import db
 from app.models import MenuItem, Order, User, WaiterProfile, Receipt
 from werkzeug.security import generate_password_hash
@@ -44,7 +44,7 @@ class FeatureTests(unittest.TestCase):
             payload = self.payload(); payload.update(paymentMethod=method, paymentStatus='Paid')
             res = self.client.post('/api/orders', json=payload)
             self.assertEqual(res.json['order']['paymentStatus'], 'Pending')
-            if method != 'Cash': self.assertIsNone(res.json['order']['receiptUrl'])
+            if method == 'M-Pesa': self.assertIsNone(res.json['order']['receiptUrl'])
 
     def test_duplicate_lines_cannot_bypass_stock(self):
         payload = self.payload(); payload['items'] *= 11
@@ -139,7 +139,7 @@ class FeatureTests(unittest.TestCase):
 
     def test_missing_mpesa_config_and_forgery(self):
         order=self.order('M-Pesa')
-        self.assertEqual(self.client.post('/api/payments/stk-push',json={'order_id':order['id']}).status_code,500)
+        self.assertEqual(self.client.post('/api/payments/stk-push',json={'order_id':order['id']}).status_code,503)
         self.assertEqual(self.client.post('/api/payments/callback',json={}).status_code,403)
 
     @patch('app.routes.payments.get_access_token',return_value='mock-token')
@@ -260,3 +260,99 @@ class FeatureTests(unittest.TestCase):
         record=logging.LogRecord('werkzeug',logging.INFO,'',0,'GET /api/receipts/'+token+'/view',(),None)
         RedactCallbackSecret().filter(record)
         self.assertNotIn(token,record.getMessage())
+
+    def test_order_retry_key_does_not_duplicate_order_or_inventory(self):
+        self.client.post('/api/orders/session')
+        headers={'Idempotency-Key':'checkout-retry-key-123456'}
+        for expected in [201,200]:
+            res=self.client.post('/api/orders',json=self.payload(),headers=headers)
+            self.assertEqual(res.status_code,expected,res.json)
+        with self.app.app_context():
+            self.assertEqual(Order.query.count(),1)
+            self.assertEqual(db.session.get(MenuItem,self.menu_item_id).stock_quantity,9)
+        changed=self.payload();changed['tableNumber']='A2'
+        self.assertEqual(self.client.post('/api/orders',json=changed,headers=headers).status_code,409)
+        self.assertEqual(self.app.test_client().post('/api/orders',json=self.payload(),headers=headers).status_code,409)
+
+    def test_notification_exceptions_do_not_fail_committed_orders_or_payments(self):
+        with patch('app.services.notifications.deliver_receipt',side_effect=RuntimeError('provider error')):
+            order=self.order('Cash')
+            self.assertEqual(self.client.get(f"/api/orders/{order['id']}").status_code,200)
+            headers=self.login()
+            response=self.client.post(f"/api/payments/orders/{order['id']}/confirm",headers=headers)
+            self.assertEqual(response.status_code,200,response.json)
+        with self.app.app_context():
+            self.assertEqual(Order.query.count(),1)
+            self.assertEqual(db.session.get(Order,order['id']).payment_status,'Paid')
+
+    def test_invalid_order_inputs_and_secure_totals(self):
+        variants=[({'items':[{'id':9999,'quantity':1}]},404),({'items':[{'id':self.menu_item_id,'quantity':0}]},400),({'items':[{'id':self.menu_item_id,'quantity':True}]},400),({'customerName':''},400),({'phone':''},400),({'tableNumber':'12'},400)]
+        for change,status in variants:
+            payload=self.payload();payload.update(change)
+            self.assertEqual(self.client.post('/api/orders',json=payload).status_code,status)
+        payload=self.payload();payload['items'][0]['price']=1;payload['total']=1
+        self.assertEqual(self.client.post('/api/orders',json=payload).json['order']['total'],500)
+        with self.app.app_context():db.session.get(MenuItem,self.menu_item_id).availability=False;db.session.commit()
+        self.assertEqual(self.client.post('/api/orders',json=self.payload()).status_code,400)
+
+    @patch('app.services.notifications.requests.post')
+    def test_whatsapp_order_events_once_and_monotonic_delivery(self,post):
+        import json,hashlib,hmac
+        from app.services.notifications import safely_notify
+        from app.models.notification import OrderNotification
+        self.app.config.update(WHATSAPP_ACCESS_TOKEN='test',WHATSAPP_PHONE_NUMBER_ID='sender',WHATSAPP_ORDER_TEMPLATE_NAME='order_event',WHATSAPP_TEMPLATE_NAME=None,WHATSAPP_APP_SECRET='app-secret')
+        response=Mock();response.json.return_value={'messages':[{'id':'event-message'}]};post.return_value=response
+        order=self.order()
+        with self.app.app_context():
+            saved=db.session.get(Order,order['id']);safely_notify(saved,'order_received')
+            self.assertEqual(OrderNotification.query.count(),1)
+        self.assertEqual(post.call_count,1)
+        for status in ['read','sent','failed','read']:
+            payload=json.dumps({'entry':[{'changes':[{'value':{'statuses':[{'id':'event-message','status':status}]}}]}]})
+            signature='sha256='+hmac.new(b'app-secret',payload.encode(),hashlib.sha256).hexdigest()
+            self.assertEqual(self.client.post('/api/receipts/whatsapp/webhook',data=payload,content_type='application/json',headers={'X-Hub-Signature-256':signature}).status_code,200)
+        with self.app.app_context():self.assertEqual(OrderNotification.query.first().status,'read')
+
+    def test_all_bundled_dish_photographs_and_credits(self):
+        from app.services.menu_images import photo_catalog
+        for photo in photo_catalog():
+            res=self.client.get('/api/menu-items/photos/'+photo['filename'])
+            self.assertEqual(res.status_code,200)
+            self.assertEqual(res.mimetype,'image/jpeg')
+            self.assertTrue(res.data.startswith(b'\xff\xd8'))
+        self.assertEqual(self.client.get('/api/menu-items/photo-credits').status_code,200)
+        self.assertEqual(self.client.get('/api/menu-items/photos/not-a-photo.jpg').status_code,404)
+        with self.app.app_context():
+            menu=db.session.get(MenuItem,self.menu_item_id);menu.name='Beef Pilau';menu.image=None;db.session.commit()
+        res=self.client.get('/api/menu-items').json
+        self.assertEqual(res[0]['image'],'/api/menu-items/photos/beef-pilau.jpg')
+
+    def test_webhook_secrets_and_non_ascii_signatures_are_rejected_safely(self):
+        import logging
+        from app.utils.logging import RedactCallbackSecret
+        record=logging.LogRecord('werkzeug',logging.INFO,'',0,'GET /api/receipts/whatsapp/webhook?hub.verify_token=private-token',(),None)
+        RedactCallbackSecret().filter(record)
+        self.assertNotIn('private-token',record.getMessage())
+        self.app.config['WHATSAPP_APP_SECRET']='test-secret'
+        response=self.client.post('/api/receipts/whatsapp/webhook',json={},headers={'X-Hub-Signature-256':'sha256=é'})
+        self.assertEqual(response.status_code,403)
+
+    @patch('app.services.notifications.requests.post')
+    def test_all_five_order_events_are_sent_once(self, post):
+        from app.models.notification import OrderNotification
+        self.app.config.update(WHATSAPP_ACCESS_TOKEN='test',WHATSAPP_PHONE_NUMBER_ID='sender',WHATSAPP_ORDER_TEMPLATE_NAME='order_event',WHATSAPP_TEMPLATE_NAME=None)
+        response=Mock();response.json.side_effect=[{'messages':[{'id':f'event-{n}'}]} for n in range(5)];post.return_value=response
+        order=self.order();headers=self.login()
+        for _ in range(2):
+            self.assertEqual(self.client.post(f"/api/payments/orders/{order['id']}/confirm",headers=headers).status_code,200)
+        self.client.post('/api/waiter/shifts/start',headers=headers)
+        with self.app.app_context(): ident=WaiterProfile.query.first().id
+        self.client.patch(f"/api/waiter/orders/{order['id']}/assignment",json={'waiter_id':ident},headers=headers)
+        for status in ['Preparing','Ready','Served']:
+            response=self.client.patch(f"/api/waiter/orders/{order['id']}/status",json={'status':status},headers=headers)
+            self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(post.call_count,5)
+        with self.app.app_context():
+            records=OrderNotification.query.all()
+            self.assertEqual({n.event for n in records},{'order_received','payment_confirmed','preparing','ready','completed'})
+            self.assertTrue(all(n.status=='accepted' for n in records))

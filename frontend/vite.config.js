@@ -1,3 +1,4 @@
+import process from 'node:process'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
@@ -11,7 +12,7 @@ export default defineConfig({
     proxy: {
       // Proxy all /api/* requests to the Flask backend so CORS is never an issue
       "/api": {
-        target: "http://127.0.0.1:5000",
+        target: process.env.QUICKBITE_PROXY_TARGET || "http://127.0.0.1:5000",
         changeOrigin: true,
       },
     },
@@ -20,7 +21,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:5000",
+        target: process.env.QUICKBITE_PROXY_TARGET || "http://127.0.0.1:5000",
         changeOrigin: true,
       },
     },

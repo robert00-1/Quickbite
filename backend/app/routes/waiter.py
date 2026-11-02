@@ -268,6 +268,10 @@ def update_order_status(order_id):
             "error": "Could not update order status"
         }), 500
 
+    from ..services.notifications import safely_notify
+    event = {"Preparing": "preparing", "Ready": "ready", "Served": "completed"}.get(new_status)
+    if event:
+        safely_notify(order, event)
     return jsonify(serialize_order(order)), 200
 
 

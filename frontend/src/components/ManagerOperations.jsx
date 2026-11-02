@@ -1,8 +1,12 @@
+import Pagination from "./Pagination";
+import MealListFilters from "./MealListFilters";
+import useMealPagination from "../hooks/useMealPagination";
 import { useEffect, useState } from "react";
 import { staffRequest } from "../services/staffApi";
 
 export default function ManagerOperations() {
   const [data, setData] = useState({complaints: [], late: [], activity: [], meals: []});
+  const mealManagement = useMealPagination(data.meals);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("All");
   async function load() {
@@ -21,11 +25,13 @@ export default function ManagerOperations() {
     <h2 className="text-xl font-bold text-slate-800">Service and meal management</h2>
     {error && <p role="alert" className="text-red-600">{error}</p>}
     <div><h3 className="mb-3 font-bold">Meal of the Day selections and estimates</h3>
-      <div className="space-y-2">{data.meals.map((meal) => <div key={meal.id} className="flex flex-wrap items-center gap-3 border-b p-2">
+      <MealListFilters pagination={mealManagement} label="meal management" />
+      <div className="space-y-2" aria-label="Meal management records">{mealManagement.items.map((meal) => <div key={meal.id} className="flex flex-wrap items-center gap-3 border-b p-2">
         <label className="flex gap-2"><input type="checkbox" checked={meal.is_food_of_day} onChange={(e) => update(`/menu-items/${meal.id}`, {is_food_of_day: e.target.checked})} />{meal.name}</label>
         <label>Prep (min) <input aria-label={`Preparation time for ${meal.name}`} className="w-20 rounded border p-1" type="number" min="0" defaultValue={meal.preparation_time} key={`prep-${meal.id}-${meal.preparation_time}`} onBlur={(e) => { if (e.target.value !== "" && Number(e.target.value) !== meal.preparation_time) update(`/menu-items/${meal.id}`, {preparation_time: Number(e.target.value)}); }} /></label>
         <label>Serving (min) <input aria-label={`Serving time for ${meal.name}`} className="w-20 rounded border p-1" type="number" min="0" defaultValue={meal.serving_time} key={`serve-${meal.id}-${meal.serving_time}`} onBlur={(e) => { if (e.target.value !== "" && Number(e.target.value) !== meal.serving_time) update(`/menu-items/${meal.id}`, {serving_time: Number(e.target.value)}); }} /></label>
       </div>)}</div>
+      <Pagination {...mealManagement} label="Service and meal management" />
     </div>
     <div><h3 className="mb-3 font-bold">Late orders</h3>
       {data.late.length === 0 ? <p>No late orders.</p> : <ul className="space-y-2">{data.late.map((o) => <li key={o.id} className="rounded bg-red-50 p-3">Order {o.id} · {o.customer} · Table {o.table_number} · {o.status} · {o.elapsed_minutes} min elapsed / {o.expected_minutes} min estimated</li>)}</ul>}

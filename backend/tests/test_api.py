@@ -22,6 +22,7 @@ class QuickBiteApiTestCase(unittest.TestCase):
             raise RuntimeError("Tests require a dedicated database named quickbite_test")
         self.app = create_app({
             "TESTING": True,
+            "MEALDB_ENABLED": False,
             "MPESA_CONSUMER_KEY": None,
             "MPESA_CONSUMER_SECRET": None,
             "MPESA_SHORTCODE": None,
@@ -31,6 +32,7 @@ class QuickBiteApiTestCase(unittest.TestCase):
             "WHATSAPP_ACCESS_TOKEN": None,
             "WHATSAPP_PHONE_NUMBER_ID": None,
             "WHATSAPP_TEMPLATE_NAME": None,
+            "WHATSAPP_ORDER_TEMPLATE_NAME": None,
             "SQLALCHEMY_DATABASE_URI": os.getenv("QUICKBITE_TEST_DATABASE_URL", "sqlite:///:memory:"),
             "SECRET_KEY": "test-secret-key-32-characters-long-enough",
             "JWT_SECRET_KEY": "test-jwt-secret-key-32-characters-long-enough",

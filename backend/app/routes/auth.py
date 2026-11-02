@@ -9,6 +9,7 @@ from werkzeug.security import (
 )
 
 from ..extensions import db
+from ..utils.origins import origin_is_allowed
 from ..models.user import User, StaffSession
 from ..utils.auth import (
     create_csrf_token,
@@ -22,27 +23,6 @@ auth_bp = Blueprint(
     __name__,
     url_prefix="/api/auth",
 )
-
-
-def allowed_origins():
-    """Return the browser origins allowed to use staff authentication."""
-    origins = {
-        current_app.config["FRONTEND_ORIGIN"].rstrip("/"),
-    }
-
-    if not current_app.config["SESSION_COOKIE_SECURE"]:
-        origins.update({
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        })
-
-    return origins
-
-
-def origin_is_allowed():
-    """Validate the origin of a browser authentication request."""
-    origin = request.headers.get("Origin", "").rstrip("/")
-    return bool(origin) and origin in allowed_origins()
 
 
 def clear_staff_cookies(response):
@@ -72,7 +52,7 @@ def clear_staff_cookies(response):
 @auth_bp.route("/login", methods=["POST"])
 def login():
     """Authenticate staff and create an eight-hour cookie session."""
-    if not origin_is_allowed():
+    if not origin_is_allowed(request.headers.get("Origin")):
         return jsonify({
             "error": "Login request origin is not allowed."
         }), 403
