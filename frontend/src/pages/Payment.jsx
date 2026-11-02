@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import DemoPayment from "../components/checkout/DemoPayment";
+import { useCart } from "../context/CartContext";
 import {
   getCustomer,
   getCart,
@@ -17,6 +18,7 @@ function Payment() {
   const navigate = useNavigate();
   const location = useLocation();
   const method = location.state?.method;
+  const { clearCart } = useCart();
 
   const [customer] = useState(() => getCustomer());
   const [cart] = useState(() => getCart());
@@ -57,6 +59,7 @@ function Payment() {
       "quickbite_orders",
       JSON.stringify(updatedOrders)
     );
+    clearCart();
 
     localStorage.removeItem("quickbite_cart");
     localStorage.removeItem("quickbite_customer");
@@ -181,6 +184,8 @@ function Payment() {
 
     // Preserve the existing Cash/Card demo flow.
     placeOrder({ customer, cart, paymentMethod: method });
+
+    clearCart();
     navigate("/order-confirmation");
   };
 
