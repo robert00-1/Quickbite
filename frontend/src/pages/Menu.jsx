@@ -115,6 +115,10 @@ function Menu() {
     (meal) => meal.category === "Meal of the Day",
   );
 
+  const foodOfTheDay = meals.find(
+    (meal) => meal.is_food_of_day === true
+  );
+
   const kidsMeals = filteredMeals.filter((meal) => meal.category === "Kids");
 
   const otherMeals = filteredMeals.filter(
@@ -183,6 +187,24 @@ function Menu() {
           />
         </div>
       </div>
+
+      {foodOfTheDay && (
+        <section className="mb-10 rounded-xl border border-red-100 bg-red-50 p-5">
+          <h2 className="mb-4 text-2xl font-bold text-gray-800">
+            Food of the Day
+          </h2>
+
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            <FoodCard
+              food={foodOfTheDay}
+              onCompare={handleCompare}
+              isSelected={compareMeals.some(
+                (meal) => meal.id === foodOfTheDay.id
+              )}
+            />
+          </div>
+        </section>
+        )}
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 

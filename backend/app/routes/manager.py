@@ -11,6 +11,7 @@ from ..models.order import Order
 from ..models.waiter_profile import WaiterProfile
 from ..models.weekly_shift import WeeklyShift
 from ..utils.auth import staff_required
+from ..models.menu_item import MenuItem
 
 
 manager_bp = Blueprint(
@@ -27,7 +28,6 @@ PAID_STATUSES = {
     "SUCCESS",
     "SUCCESSFUL",
 }
-
 
 # =========================================================
 # EXISTING MANAGER FUNCTIONS
@@ -901,3 +901,58 @@ def deactivate_weekly_shift(shift_id):
         return jsonify({
             "error": "Unable to deactivate weekly shift."
         }), 500
+
+@manager_bp.get("/food-of-the-day")
+def get_food_of_the_day():
+    meal = MenuItem.query.filter_by(is_food_of_day=True).first()
+
+    if meal is None:
+        return jsonify({"message": "No Food of the Day selected"}), 404
+
+    return jsonify({
+        "id": meal.id,
+        "name": meal.name,
+        "description": meal.description,
+        "price": float(meal.price),
+        "image": meal.image,
+        "category": meal.category,
+        "ingredients": meal.ingredients or [],
+        "availability": meal.availability,
+        "is_food_of_day": meal.is_food_of_day,
+    }), 200
+
+
+@manager_bp.put("/food-of-the-day")
+@staff_required("manager")
+def set_food_of_the_day():
+    data = request.get_json(silent=True) or {}
+    meal_id = data.get("meal_id")
+
+    if meal_id is None:
+        return jsonify({"error": "meal_id is required"}), 400
+
+    meal = db.session.get(MenuItem, meal_id)
+
+    if meal is None:
+        return jsonify({"error": "Menu item not found"}), 404
+
+    if not meal.availability:
+        return jsonify({"error": "Cannot select an unavailable meal"}), 400
+
+    try:
+        MenuItem.query.update(
+            {MenuItem.is_food_of_day: False},
+            synchronize_session=False,
+        )
+        meal.is_food_of_day = True
+        db.session.commit()
+
+        return jsonify({
+            "message": "Food of the Day updated successfully",
+            "meal_id": meal.id,
+            "name": meal.name,
+        }), 200
+
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Could not update Food of the Day"}), 500

@@ -61,6 +61,7 @@ def serialize_item(item):
         "ingredients": item.ingredients or [],
         "availability": bool(item.availability),
         "stock_quantity": item.stock_quantity,
+        "is_food_of_day": bool(item.is_food_of_day),
     }
 
 

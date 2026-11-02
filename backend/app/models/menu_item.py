@@ -35,3 +35,10 @@ class MenuItem(db.Model):
         default=10,
         server_default="10",
     )
+
+    is_food_of_day = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )

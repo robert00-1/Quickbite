@@ -309,3 +309,14 @@ export async function deleteWeeklyShift(shiftId) {
     method: "DELETE",
   });
 }
+
+export async function setFoodOfTheDay(mealId) {
+  if (mealId === undefined || mealId === null || mealId === "") {
+    throw new Error("Please select a meal.");
+  }
+
+  return staffRequest("/manager/food-of-the-day", {
+    method: "PUT",
+    body: JSON.stringify({ meal_id: Number(mealId) }),
+  });
+}

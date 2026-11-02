@@ -20,12 +20,16 @@ import {
   updateMenuItemAvailability,
   updateMenuItemImage,
   uploadMenuItemImage,
+  setFoodOfTheDay,
 } from "../services/managerApi";
+
 import {
   clearStaffSession,
   getStaffUser,
   staffRequest,
 } from "../services/staffApi";
+
+
 
 const REFRESH_MS = 10000;
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -144,6 +148,9 @@ function ManagerDashboard() {
   const [waiterFormSuccess, setWaiterFormSuccess] = useState("");
   const [waiterFormLoading, setWaiterFormLoading] = useState(false);
   const [deletingWaiterId, setDeletingWaiterId] = useState(null);
+  const [selectedFoodOfDay, setSelectedFoodOfDay] = useState("");
+  const [savingFoodOfDay, setSavingFoodOfDay] = useState(false);
+  const [foodOfDayMessage, setFoodOfDayMessage] = useState("");
   // Weekly waiter scheduling state.
 const [shiftDraft, setShiftDraft] = useState({
   waiterId: "",
@@ -243,6 +250,24 @@ const stockRequestInProgress = useRef(false);
       stockRequestInProgress.current = false;
     }
   }, []);
+
+  const handleFoodOfDayUpdate = async (event) => {
+    event.preventDefault();
+    setFoodOfDayMessage("");
+    setSavingFoodOfDay(true);
+  
+    try {
+      await setFoodOfTheDay(selectedFoodOfDay);
+      setFoodOfDayMessage("Food of the Day updated successfully.");
+      await loadStock();
+    } catch (err) {
+      setFoodOfDayMessage(
+        err.message || "Unable to update Food of the Day."
+      );
+    } finally {
+      setSavingFoodOfDay(false);
+    }
+  };
 
   const handleAvailabilityUpdate = async (item) => {
     if (savingStockIdRef.current !== null) return;
@@ -1644,6 +1669,50 @@ const handleRemoveShift = async (shiftId) => {
             </div>
           )}
         </section>
+        <div className="mb-6 rounded-xl border border-red-100 bg-red-50 p-5">
+          <h3 className="mb-2 text-lg font-bold text-gray-800">
+            Food of the Day
+          </h3>
+
+          <p className="mb-4 text-sm text-gray-600">
+            Choose the meal featured on the customer menu.
+          </p>
+
+          <form
+            onSubmit={handleFoodOfDayUpdate}
+            className="flex flex-col gap-3 sm:flex-row"
+          >
+            <select
+              value={selectedFoodOfDay}
+              onChange={(event) => setSelectedFoodOfDay(event.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
+              required
+            >
+              <option value="">Select an available meal</option>
+              {stockItems
+                .filter((item) => item.availability === true)
+                .map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+            </select>
+
+            <button
+              type="submit"
+              disabled={!selectedFoodOfDay || savingFoodOfDay}
+              className="rounded-lg bg-red-500 px-5 py-2 font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingFoodOfDay ? "Saving..." : "Set Food of the Day"}
+            </button>
+          </form>
+
+          {foodOfDayMessage && (
+            <p role="status" className="mt-3 text-sm text-gray-700">
+              {foodOfDayMessage}
+            </p>
+          )}
+        </div>
 
         {/* RECENT ORDERS */}
         <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">

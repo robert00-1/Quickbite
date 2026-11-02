@@ -1,48 +1,51 @@
+
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import {
+  Utensils,
+  ShoppingCart,
+  ReceiptText,
+  Gamepad2,
+} from "lucide-react";
 import { useCart } from "../context/CartContext";
+import logo from "../assets/QuickBite-logo.png";
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
-  const { cart } = useCart();
+  const { cart, cartCount } = useCart();
+  const location = useLocation();
 
-  const cartItemCount = cart.reduce(
-  (total, item) => total + item.quantity,
-  0
-  );
+  const itemCount =
+    cartCount ??
+    (cart || []).reduce((total, item) => total + item.quantity, 0);
 
-  const closeMenu = () => {
-    setIsOpen(false);
-  };
+  const closeMenu = () => setIsOpen(false);
+
+  const links = [
+    { to: "/menu", label: "Menu", Icon: Utensils },
+    { to: "/cart", label: "Cart", Icon: ShoppingCart },
+    { to: "/order-status", label: "Order Status", Icon: ReceiptText },
+    { to: "/games", label: "Games", Icon: Gamepad2 },
+  ];
+
+  const isActive = (path) =>
+    location.pathname === path ||
+    (path === "/menu" && location.pathname.startsWith("/menu/"));
 
   return (
     <>
-      {/* Menu button — visible on desktop and mobile */}
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed left-4 top-4 z-[60] flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg bg-red-500 shadow-md"
+        onClick={() => setIsOpen((open) => !open)}
+        className="fixed left-4 top-4 z-[60] flex h-11 w-11 items-center justify-center rounded-lg bg-red-500 shadow-md"
         aria-label={isOpen ? "Close menu" : "Open menu"}
         aria-expanded={isOpen}
       >
-        <span
-          className={`block h-0.5 w-5 bg-white transition-transform ${
-            isOpen ? "translate-y-2 rotate-45" : ""
-          }`}
-        />
-        <span
-          className={`block h-0.5 w-5 bg-white transition-opacity ${
-            isOpen ? "opacity-0" : ""
-          }`}
-        />
-        <span
-          className={`block h-0.5 w-5 bg-white transition-transform ${
-            isOpen ? "-translate-y-2 -rotate-45" : ""
-          }`}
-        />
+        <span className="text-xl font-bold text-white">
+          {isOpen ? "×" : "☰"}
+        </span>
       </button>
 
-      {/* Overlay */}
       {isOpen && (
         <div
           onClick={closeMenu}
@@ -50,54 +53,45 @@ function Navbar() {
         />
       )}
 
-      {/* Customer sidebar */}
       <aside
         className={`fixed left-0 top-0 z-50 flex h-screen w-64 flex-col bg-red-500 p-5 shadow-xl transition-transform duration-300 ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Logo */}
-        <div className="mb-8 flex h-32 shrink-0 items-center justify-center rounded-xl bg-white">
-          <span className="text-2xl font-bold text-red-500">
-            QUICKBITE
-          </span>
-        </div>
-
-        {/* Customer navigation */}
-        <nav className="flex flex-col gap-4">
-         <Link
-           to="/cart"
-           onClick={closeMenu}
-           className="relative rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
-          >
-         <span>🛒 Cart</span>
-
-         {cartItemCount > 0 && (
-           <span
-             key={cartItemCount}
-             className="absolute -right-2 -top-2 flex h-7 min-w-7 animate-bounce items-center justify-center rounded-full bg-yellow-400 px-2 text-sm font-extrabold text-red-700 shadow-lg ring-2 ring-white"
-             aria-label={`${cartItemCount} items in cart`}
-           >
-             {cartItemCount}
-           </span>
-         )}
+        <Link
+          to="/menu"
+          onClick={closeMenu}
+          className="mb-8 flex h-32 shrink-0 items-center justify-center rounded-xl bg-white"
+        >
+          <img
+            src={logo}
+            alt="QuickBite"
+            className="max-h-28 max-w-full object-contain"
+          />
         </Link>
 
-          <Link
-            to="/order-status"
-            onClick={closeMenu}
-            className="rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
-          >
-            Order Status
-          </Link>
+        <nav className="flex flex-col gap-4">
+          {links.map(({ to, label, Icon }) => (
+            <Link
+              key={to}
+              to={to}
+              onClick={closeMenu}
+              className={`relative flex items-center gap-3 rounded-xl px-5 py-4 font-bold no-underline transition ${
+                isActive(to)
+                  ? "bg-white text-red-600"
+                  : "text-white hover:bg-red-600"
+              }`}
+            >
+              <Icon size={20} />
+              <span>{label}</span>
 
-          <Link
-            to="/games"
-            onClick={closeMenu}
-            className="rounded-xl bg-white px-5 py-4 text-center font-bold text-red-500 no-underline transition hover:bg-red-50"
-          >
-            Games
-          </Link>
+              {label === "Cart" && itemCount > 0 && (
+                <span className="ml-auto flex h-6 min-w-6 items-center justify-center rounded-full bg-yellow-400 px-1 text-xs font-bold text-red-700">
+                  {itemCount}
+                </span>
+              )}
+            </Link>
+          ))}
         </nav>
       </aside>
     </>
