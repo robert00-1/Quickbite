@@ -40,6 +40,9 @@ function normalizeOrder(order) {
 
   return {
     id: String(order.id),
+    preparationMinutes: order.preparationMinutes,
+    servingMinutes: order.servingMinutes,
+    receiptUrl: order.receipt_url,
     customerName: order.customer || order.customer_name || "Customer",
     phone: order.phone || "",
     tableNumber: order.table_number,
@@ -211,17 +214,6 @@ function WaiterDashboard() {
 
     return () => clearInterval(interval);
   }, [loadWaiters, loadAvailableWaiters]);
-
-  const handleSelectWaiter = (event) => {
-    const waiterId = event.target.value;
-    setSelectedWaiterId(waiterId);
-
-    if (waiterId) {
-      sessionStorage.setItem("quickbite_selected_waiter_id", waiterId);
-    } else {
-      sessionStorage.removeItem("quickbite_selected_waiter_id");
-    }
-  };
 
   const handleAssignWaiter = async (orderId, waiterId) => {
     if (!waiterId) {

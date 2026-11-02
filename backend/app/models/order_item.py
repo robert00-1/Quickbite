@@ -1,4 +1,3 @@
-
 from ..extensions import db
 
 
@@ -22,6 +21,20 @@ class OrderItem(db.Model):
     item_name = db.Column(db.String(100), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(10, 2), nullable=False)
+
+    preparation_time = db.Column(
+        db.Integer,
+        nullable=False,
+        default=15,
+        server_default="15",
+    )
+
+    serving_time = db.Column(
+        db.Integer,
+        nullable=False,
+        default=5,
+        server_default="5",
+    )
 
     order = db.relationship(
         "Order",

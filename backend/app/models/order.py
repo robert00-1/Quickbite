@@ -7,9 +7,11 @@ class Order(db.Model):
     __tablename__ = "orders"
 
     id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.String(64), nullable=True, index=True)
+    served_at = db.Column(db.DateTime(timezone=True), nullable=True)
     customer_name = db.Column(db.String(120), nullable=False)
     phone = db.Column(db.String(20), nullable=False)
-    table_number = db.Column(db.Integer, nullable=False)
+    table_number = db.Column(db.String(10), nullable=False)
 
     total = db.Column(db.Numeric(10, 2), nullable=False)
     payment_method = db.Column(db.String(20), nullable=False)
@@ -66,5 +68,12 @@ class Order(db.Model):
     items = db.relationship(
         "OrderItem",
         back_populates="order",
+        cascade="all, delete-orphan",
+    )
+
+    receipt = db.relationship(
+        "Receipt",
+        back_populates="order",
+        uselist=False,
         cascade="all, delete-orphan",
     )

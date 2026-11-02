@@ -1,15 +1,17 @@
 
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from sqlalchemy import or_
 
 from ..extensions import db
 from ..models.order import Order
+from ..models.shift import Shift
 from ..models.waiter_profile import WaiterProfile
 from ..models.weekly_shift import WeeklyShift
 from ..utils.auth import staff_required
+from ..utils.timing import utc, estimates
 
 
 waiter_bp = Blueprint(
@@ -26,6 +28,9 @@ ACTIVE_ORDER_STATUSES = ["Pending", "Preparing", "Ready"]
 def is_waiter_on_shift(waiter_id):
     """Check whether a waiter is within their scheduled Nairobi shift."""
 
+    profile = db.session.get(WaiterProfile, waiter_id)
+    if profile and profile.user_id and Shift.query.filter_by(waiter_id=profile.user_id, ended_at=None).first():
+        return True
     now = datetime.now(ZoneInfo("Africa/Nairobi"))
     current_day = now.weekday()
     current_time = now.time().replace(tzinfo=None)
@@ -57,6 +62,8 @@ def serialize_order(order):
     assigned_waiter = order.assigned_waiter
 
     return {
+        **estimates(order),
+        "receipt_url": f"/api/receipts/{order.receipt.receipt_token}/view" if order.receipt else None,
         "id": order.id,
         "customer": order.customer_name,
         "phone": order.phone,
@@ -249,6 +256,7 @@ def update_order_status(order_id):
 
         # Save a permanent name snapshot for the receipt.
         order.served_by_name = waiter.full_name
+        order.served_at = datetime.now(timezone.utc)
 
     order.order_status = new_status
 
@@ -261,3 +269,89 @@ def update_order_status(order_id):
         }), 500
 
     return jsonify(serialize_order(order)), 200
+
+
+@waiter_bp.route("/record", methods=["GET"])
+@staff_required("waiter", "manager")
+def get_waiter_record():
+    user = g.staff_user
+    from ..services.activity import activity
+    profile = WaiterProfile.query.filter_by(user_id=user.id).first()
+    return jsonify({"waiter_id": user.id, "waiter_name": user.full_name or user.username, **activity(user.id, profile)}), 200
+
+
+@waiter_bp.route("/shifts/start", methods=["POST"])
+@staff_required("waiter", "manager")
+def start_waiter_shift():
+    user = g.staff_user
+    active_shift = Shift.query.filter_by(waiter_id=user.id, ended_at=None).first()
+    if active_shift:
+        return jsonify({
+            "message": "Shift already active",
+            "shift": {
+                "id": active_shift.id,
+                "started_at": active_shift.started_at.isoformat(),
+                "is_active": True,
+            },
+        }), 200
+
+    new_shift = Shift(waiter_id=user.id)
+    try:
+        db.session.add(new_shift)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Could not start shift"}), 500
+
+    return jsonify({
+        "message": "Shift started successfully",
+        "shift": {
+            "id": new_shift.id,
+            "started_at": new_shift.started_at.isoformat(),
+            "is_active": True,
+        },
+    }), 201
+
+
+@waiter_bp.route("/shifts/end", methods=["POST"])
+@staff_required("waiter", "manager")
+def end_waiter_shift():
+    user = g.staff_user
+    active_shift = Shift.query.filter_by(waiter_id=user.id, ended_at=None).first()
+    if not active_shift:
+        return jsonify({"error": "No active shift found to end"}), 400
+
+    active_shift.ended_at = datetime.now(timezone.utc)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Could not end shift"}), 500
+
+    return jsonify({
+        "message": "Shift ended successfully",
+        "shift": {
+            "id": active_shift.id,
+            "started_at": active_shift.started_at.isoformat(),
+            "ended_at": active_shift.ended_at.isoformat(),
+            "hours": active_shift.hours_worked,
+            "is_active": False,
+        },
+    }), 200
+
+
+@waiter_bp.route("/roster", methods=["GET"])
+@staff_required("waiter", "manager")
+def get_waiter_roster():
+    from ..services.activity import activity
+    roster = []
+    for profile in WaiterProfile.query.filter_by(is_active=True).all():
+        active = Shift.query.filter_by(waiter_id=profile.user_id, ended_at=None).first() if profile.user_id else None
+        current = Order.query.filter(Order.assigned_waiter_id == profile.id, Order.order_status.in_(ACTIVE_ORDER_STATUSES)).all()
+        record = activity(profile.user_id, profile)
+        roster.append({"waiter_id": profile.id, "full_name": profile.full_name,
+            "on_shift_since": utc(active.started_at).isoformat() if active else None,
+            "hours_so_far": active.hours_worked if active else 0,
+            "current_tables": sorted({o.table_number for o in current}), "tables_served": record["tables_served"],
+            "status": "OFF_SHIFT" if not active else ("BUSY" if current else "AVAILABLE")})
+    return jsonify(roster), 200

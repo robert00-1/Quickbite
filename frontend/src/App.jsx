@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 
 import {
   BrowserRouter,
@@ -12,21 +13,24 @@ import CustomerDetails from "./pages/CustomerDetails";
 import Checkout from "./pages/Checkout";
 import Payment from "./pages/Payment";
 import OrderConfirmationPage from "./pages/OrderConfirmation";
-import Waiter from "./pages/WaiterDashboard";
+const Waiter = lazy(() => import("./pages/WaiterDashboard"));
 import Cart from "./pages/Cart";
-import ManagerDashboard from "./pages/ManagerDashboard";
+const ManagerDashboard = lazy(() => import("./pages/ManagerDashboard"));
 import Navbar from "./components/Navbar";
 import OrderStatus from "./pages/OrderStatus";
 import StaffLogin from "./pages/StaffLogin";
 import Games from "./pages/Games";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { CartProvider } from "./context/CartContext";
 
 function App() {
   return (
-    <BrowserRouter>
-      <Navbar />
+    <CartProvider>
+      <BrowserRouter>
+        <Navbar />
 
-      <main className="ml-0 min-h-screen min-w-0 overflow-x-hidden md:ml-64">
+        <div className="min-h-screen min-w-0 overflow-x-hidden pt-20">
+        <Suspense fallback={<p className="p-6">Loading page...</p>}>
         <Routes>
           <Route
             path="/"
@@ -96,8 +100,10 @@ function App() {
             element={<Navigate to="/menu" replace />}
           />
         </Routes>
-      </main>
-    </BrowserRouter>
+        </Suspense>
+        </div>
+      </BrowserRouter>
+  </CartProvider>
   );
 }
 

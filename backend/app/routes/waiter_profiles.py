@@ -89,75 +89,11 @@ def get_waiters():
 def get_available_waiters():
     """Return active waiters currently on shift and not busy."""
 
-    now = datetime.now(KENYA_TIMEZONE)
-    current_day = now.weekday()
-    current_time = now.time().replace(tzinfo=None)
-
-    busy_waiter_ids = {
-        waiter_id
-        for (waiter_id,) in db.session.query(
-            Order.assigned_waiter_id
-        ).filter(
-            Order.assigned_waiter_id.isnot(None),
-            Order.order_status.in_(ACTIVE_ORDER_STATUSES),
-        ).all()
-    }
-
-    active_shifts = (
-        WeeklyShift.query
-        .filter(
-            WeeklyShift.is_active.is_(True),
-            WeeklyShift.day_of_week == current_day,
-            WeeklyShift.start_time <= current_time,
-            WeeklyShift.end_time > current_time,
-        )
-        .order_by(WeeklyShift.start_time)
-        .all()
-    )
-
-    available_waiters = []
-    included_waiter_ids = set()
-
-    for shift in active_shifts:
-        waiter = db.session.get(WaiterProfile, shift.waiter_id)
-
-        if waiter is None:
-            continue
-
-        if not waiter.is_active:
-            continue
-
-        if waiter.id in busy_waiter_ids:
-            continue
-
-        if waiter.id in included_waiter_ids:
-            continue
-
-        included_waiter_ids.add(waiter.id)
-
-        available_waiters.append({
-            "id": waiter.id,
-            "full_name": waiter.full_name,
-            "is_active": waiter.is_active,
-            "shift": {
-                "day_of_week": shift.day_of_week,
-                "day_name": DAY_NAMES[shift.day_of_week],
-                "start_time": shift.start_time.strftime("%H:%M"),
-                "end_time": shift.end_time.strftime("%H:%M"),
-            },
-        })
-
-    available_waiters.sort(
-        key=lambda waiter: waiter["full_name"].lower()
-    )
-
-    return jsonify({
-        "current_day": DAY_NAMES[current_day],
-        "current_time": now.strftime("%H:%M"),
-        "timezone": "Africa/Nairobi",
-        "total": len(available_waiters),
-        "waiters": available_waiters,
-    }), 200
+    from .waiter import is_waiter_on_shift, waiter_has_active_order
+    waiters = WaiterProfile.query.filter_by(is_active=True).order_by(WaiterProfile.full_name).all()
+    return jsonify({"timezone": "Africa/Nairobi", "total": len(waiters), "waiters": [
+        {**serialize_waiter(w), "on_shift": is_waiter_on_shift(w.id), "busy": waiter_has_active_order(w.id)} for w in waiters
+    ]}), 200
 
 
 @waiter_profiles_bp.route("", methods=["POST"])

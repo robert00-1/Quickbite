@@ -42,3 +42,17 @@ class MenuItem(db.Model):
         default=False,
         server_default="false",
     )
+
+    preparation_time = db.Column(
+        db.Integer,
+        nullable=False,
+        default=15,
+        server_default="15",
+    )
+
+    serving_time = db.Column(
+        db.Integer,
+        nullable=False,
+        default=5,
+        server_default="5",
+    )

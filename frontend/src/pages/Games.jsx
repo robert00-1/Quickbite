@@ -627,9 +627,16 @@ function Games() {
           </div>
 
           {rpsResult && (
-            <p className="mt-8 text-lg font-bold text-gray-800">
-              {rpsResult}
-            </p>
+            <div className="mt-8">
+              {rpsChoice && (
+                <p className="mb-1 text-sm text-gray-500">
+                  Your choice: {rpsChoice}
+                </p>
+              )}
+              <p className="text-lg font-bold text-gray-800">
+                {rpsResult}
+              </p>
+            </div>
           )}
         </div>
 

@@ -1,24 +1,63 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getOrders } from "../utils/orderHelpers";
+import { getOrders, updateStoredOrder } from "../utils/orderHelpers";
+
+import { API_ROOT } from "../services/staffApi";
 
 const statuses = ["Pending", "Preparing", "Ready", "Served"];
 
 function OrderStatus() {
   const [orders, setOrders] = useState([]);
+  const [feedback, setFeedback] = useState({});
+  const [message, setMessage] = useState("");
+  async function complain(order) {
+    try {
+      const res = await fetch(`${API_ROOT}/complaints`, {method: "POST", credentials: "include", headers: {"Content-Type": "application/json"}, body: JSON.stringify({orderId: Number(order.id), message: feedback[order.id] || "My meal is taking longer than the estimate."})});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMessage("Your complaint was sent to the manager.");
+    } catch (err) { setMessage(err.message); }
+  }
 
   useEffect(() => {
+    let cancelled = false;
+
+    const syncWithBackend = async (currentOrders) => {
+      const numericOrders = currentOrders.filter(
+        (o) => !isNaN(Number(o.id)) && o.orderStatus !== "Served"
+      );
+
+      for (const ord of numericOrders) {
+        try {
+          const res = await fetch(`${API_ROOT}/orders/${ord.id}`, { credentials: "include" });
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data?.order && !cancelled) {
+            updateStoredOrder(ord.id, data.order);
+          }
+        } catch {
+          // Ignore network errors in polling
+        }
+      }
+
+      if (!cancelled) {
+        setOrders([...getOrders()].reverse());
+      }
+    };
+
     const loadOrders = () => {
-      setOrders(getOrders().reverse());
+      const current = getOrders();
+      setOrders([...current].reverse());
+      syncWithBackend(current);
     };
 
     loadOrders();
 
-    const interval = setInterval(loadOrders, 2000);
-
+    const interval = setInterval(loadOrders, 4000);
     window.addEventListener("storage", loadOrders);
 
     return () => {
+      cancelled = true;
       clearInterval(interval);
       window.removeEventListener("storage", loadOrders);
     };
@@ -57,6 +96,7 @@ function OrderStatus() {
         Track the progress of your orders.
       </p>
 
+      {message && <p role="status">{message}</p>}
       <div className="flex flex-col gap-6">
         {orders.map((order) => {
           const currentIndex = statuses.indexOf(order.orderStatus);
@@ -82,6 +122,9 @@ function OrderStatus() {
                 </p>
               </div>
 
+              <p>Preparation: {order.preparationMinutes} min · Serving: {order.servingMinutes} min</p>
+              {order.receiptUrl && <a className="text-red-500" href={`${API_ROOT.replace(/\/api$/, "")}${order.receiptUrl}/view`} target="_blank" rel="noreferrer">View / Print receipt</a>}
+              {order.isLate && <div className="my-4"><label>Late meal feedback<input aria-label={`Feedback for order ${order.id}`} value={feedback[order.id] || ""} onChange={(e) => setFeedback({...feedback, [order.id]: e.target.value})} className="border p-2" /></label><button type="button" className="ml-2 text-red-600" onClick={() => complain(order)}>Report late meal</button></div>}
               {/* Status Progress */}
               <div className="grid grid-cols-4 gap-2">
                 {statuses.map((status, index) => {

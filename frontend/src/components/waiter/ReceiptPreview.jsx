@@ -89,6 +89,8 @@ function ReceiptPreview({ order, onClose }) {
     writeLine(`Customer: ${order.customerName || "Customer"}`);
     writeLine(`Date: ${receiptDate}`);
     writeLine(`Waiter: ${waiterName}`);
+    writeLine(`Preparation: ${order.preparationMinutes ?? "—"} min`);
+    writeLine(`Serving: ${order.servingMinutes ?? "—"} min`);
 
     y += 2;
     divider();
@@ -254,6 +256,7 @@ function ReceiptPreview({ order, onClose }) {
                 </div>
               </header>
 
+              <p className="mt-4 text-xs">Preparation: {order.preparationMinutes ?? "—"} min · Serving: {order.servingMinutes ?? "—"} min</p>
               <div className="my-5 border-t border-dashed border-black" />
 
               <div className="space-y-1 break-words text-[12px]">

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { API_ROOT, saveStaffSession } from "../services/staffApi";
 
@@ -7,6 +8,7 @@ function StaffLogin() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -109,16 +111,20 @@ function StaffLogin() {
               Password
             </label>
 
+            <div className="relative">
             <input
               id="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Enter your password"
-              className="w-full rounded-lg border-2 border-gray-200 px-4 py-3 outline-none transition focus:border-red-500"
+              className="w-full rounded-lg border-2 border-gray-200 px-4 py-3 pr-12 outline-none transition focus:border-red-500"
             />
+            <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500">
+              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button></div>
           </div>
 
           <button

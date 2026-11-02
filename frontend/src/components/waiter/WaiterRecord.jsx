@@ -106,6 +106,7 @@ function WaiterRecord() {
             </div>
           </div>
 
+          <p className="mb-4 text-sm text-gray-600">Orders served: {record.orders_served ?? 0} · Average serving time: {record.average_serving_minutes == null ? "No timed records" : `${record.average_serving_minutes} min`}</p>
           <h3 className="mb-2 text-sm font-semibold text-gray-600">
             Recent shifts
           </h3>
@@ -127,7 +128,7 @@ function WaiterRecord() {
                   </span>
 
                   <span className="font-semibold">
-                    {shift.hours_worked} hrs
+                    {shift.hours} hrs
                   </span>
                 </li>
               ))}

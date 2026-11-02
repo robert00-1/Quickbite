@@ -1,0 +1,69 @@
+"""Live smoke checks for fixture_server.py and Vite at 127.0.0.1:5174."""
+from playwright.sync_api import sync_playwright
+import json
+with sync_playwright() as p:
+    browser=p.chromium.launch(headless=True)
+    page=browser.new_page(viewport={'width':1280,'height':900})
+    errors=[]
+    console_errors=[]
+    page.on('pageerror',lambda e:errors.append(str(e)))
+    page.on('console', lambda msg: console_errors.append(msg.text) if msg.type == 'error' else None)
+    page.goto('http://127.0.0.1:5174/menu')
+    page.get_by_text('Test Juice',exact=True).wait_for()
+    assert page.get_by_text('Test Burger',exact=True).count()==2
+    assert page.get_by_text('Test Kids Meal',exact=True).count()==2
+    assert page.locator('img').evaluate_all('(images) => images.every(img => img.complete && img.naturalWidth > 0)')
+    page.get_by_placeholder('Search for a meal...').fill('Juice')
+    page.wait_for_timeout(600)
+    assert page.get_by_text('Test Burger',exact=True).count()==0
+    page.get_by_placeholder('Search for a meal...').fill('')
+    page.wait_for_timeout(600)
+    page.screenshot(path='/tmp/quickbite-menu.png',full_page=True)
+    page.goto('http://127.0.0.1:5174/staff-login')
+    page.get_by_label('Username',exact=True).fill('manager')
+    page.get_by_label('Password',exact=True).fill('runtime-password')
+    page.get_by_role('button',name='Show password').click()
+    assert page.get_by_label('Password',exact=True).get_attribute('type')=='text'
+    page.get_by_role('button',name='Hide password').click()
+    page.get_by_role('button',name='Login',exact=True).click()
+    page.wait_for_url('**/manager')
+    page.get_by_text('Service and meal management',exact=True).wait_for()
+    page.get_by_text('Customer complaints',exact=True).wait_for()
+    page.screenshot(path='/tmp/quickbite-manager.png',full_page=True)
+    print(json.dumps({'menu':'passed','images':'fallback loaded','search':'passed','manager_login_redirect':'passed','manager_operations':'passed','page_errors':errors}))
+    customer_context=browser.new_context(viewport={'width':390,'height':844})
+    customer=customer_context.new_page()
+    customer.on('pageerror', lambda e:errors.append(str(e)))
+    customer.goto('http://127.0.0.1:5174/menu/1')
+    customer.get_by_role('button',name='Add to Cart',exact=True).click()
+    customer.get_by_role('link',name='Proceed to Checkout').click()
+    customer.get_by_label('Full Name',exact=True).fill('Browser Customer')
+    customer.get_by_label('Phone Number',exact=True).fill('0712345678')
+    customer.get_by_label('Table Number',exact=True).fill('A2')
+    customer.get_by_role('button',name='Continue to Checkout',exact=False).click()
+    customer.get_by_role('button',name='Cash',exact=True).click()
+    customer.get_by_role('button',name='Continue to Payment',exact=True).click()
+    customer.get_by_role('button',name='Confirm order',exact=True).click()
+    customer.get_by_text('Order Placed!',exact=True).wait_for()
+    receipt_link=customer.get_by_role('link',name='View / Print receipt')
+    receipt=customer_context.new_page()
+    receipt.goto('http://127.0.0.1:5174' + receipt_link.get_attribute('href') if receipt_link.get_attribute('href').startswith('/') else receipt_link.get_attribute('href'))
+    receipt.get_by_role('button',name='Print receipt').wait_for()
+    assert receipt.get_by_text('Browser Customer',exact=False).count()>0
+    assert receipt.locator('img[alt="Receipt QR code"]').evaluate('(img) => img.complete && img.naturalWidth > 0')
+    customer.goto('http://127.0.0.1:5174/order-status')
+    customer.get_by_text('Current Status: Pending',exact=True).wait_for()
+    staff_context=browser.new_context()
+    waiter=staff_context.new_page()
+    waiter.on('pageerror',lambda e:errors.append(str(e)))
+    waiter.goto('http://127.0.0.1:5174/staff-login')
+    waiter.get_by_label('Username',exact=True).fill('waiter')
+    waiter.get_by_label('Password',exact=True).fill('runtime-password')
+    waiter.get_by_role('button',name='Login',exact=True).click()
+    waiter.wait_for_url('**/waiter')
+    waiter.get_by_text('Table A2',exact=True).first.wait_for()
+    waiter.screenshot(path='/tmp/quickbite-waiter.png',full_page=True)
+    print(json.dumps({'mobile_cash_checkout':'passed','receipt_and_qr_page':'passed','order_tracking':'passed','waiter_login_redirect':'passed','waiter_orders':'passed','page_errors':errors}))
+    assert not errors, errors
+    assert not console_errors, console_errors
+    browser.close()

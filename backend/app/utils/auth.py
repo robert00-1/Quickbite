@@ -6,6 +6,7 @@ import hmac
 
 from flask import current_app, g, jsonify, request
 from itsdangerous import BadSignature, URLSafeSerializer
+from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
 
 from ..extensions import db
 from ..models.user import StaffSession, User
@@ -57,6 +58,10 @@ def staff_required(*allowed_roles):
                     "error": "Authentication required. Please log in."
                 }), 401
 
+            try:
+                verify_jwt_in_request()
+            except Exception:
+                return jsonify({"error": "Invalid or expired session"}), 401
             session_hash = hash_token(token)
 
             staff_session = StaffSession.query.filter_by(
@@ -100,7 +105,7 @@ def staff_required(*allowed_roles):
 
             staff_user = db.session.get(User, staff_session.user_id)
 
-            if staff_user is None or not staff_user.is_active:
+            if staff_user is None or not staff_user.is_active or str(staff_user.id) != get_jwt_identity():
                 return jsonify({
                     "error": "Staff account is inactive."
                 }), 401
@@ -116,12 +121,12 @@ def staff_required(*allowed_roles):
                 )
                 csrf_header = request.headers.get("X-CSRF-Token", "")
 
-                if (
-                    not csrf_cookie
-                    or not csrf_header
-                    or not hmac.compare_digest(csrf_cookie, csrf_header)
-                    or not valid_csrf_token(csrf_header, session_hash)
-                ):
+                if not csrf_header or not valid_csrf_token(csrf_header, session_hash):
+                    return jsonify({
+                        "error": "CSRF validation failed. Refresh and try again."
+                    }), 403
+
+                if csrf_cookie and not hmac.compare_digest(csrf_cookie, csrf_header):
                     return jsonify({
                         "error": "CSRF validation failed. Refresh and try again."
                     }), 403

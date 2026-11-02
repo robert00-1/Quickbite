@@ -68,7 +68,7 @@ export function placeOrder({ customer, cart, paymentMethod }) {
     id: generateOrderId(),
     customerName: customer.fullName,
     phone: customer.phone,
-    tableNumber: Number(customer.tableNumber),
+    tableNumber: String(customer.tableNumber).trim().toUpperCase(),
     items: cart.map((item) => ({
       id: item.id,
       name: item.name,
@@ -77,7 +77,7 @@ export function placeOrder({ customer, cart, paymentMethod }) {
     })),
     total: getCartTotal(cart),
     paymentMethod,
-    paymentStatus: "Paid",
+    paymentStatus: "Pending",
     orderStatus: "Pending",
     createdAt: new Date().toISOString(),
   };
@@ -86,6 +86,15 @@ export function placeOrder({ customer, cart, paymentMethod }) {
   localStorage.removeItem(CART_KEY);
   localStorage.removeItem(CUSTOMER_KEY);
   return order;
+}
+
+export function updateStoredOrder(orderId, updatedOrder) {
+  const orders = getOrders();
+  const nextOrders = orders.map((o) =>
+    String(o.id) === String(orderId) ? { ...o, ...updatedOrder } : o
+  );
+  localStorage.setItem(ORDERS_KEY, JSON.stringify(nextOrders));
+  return nextOrders;
 }
 
 export const ORDER_STATUSES = ["Pending", "Preparing", "Ready", "Served"];
